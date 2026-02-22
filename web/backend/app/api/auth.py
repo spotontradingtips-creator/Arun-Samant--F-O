@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel, EmailStr
 import secrets
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.models.database import get_db, User, UserSettings
 from app.core.security import (
@@ -87,9 +90,12 @@ async def register(
     db.commit()
     db.refresh(user)
 
-    # Send confirmation email
+    # Send confirmation email (don't let email failure block registration)
     domain = str(request.base_url).rstrip("/")
-    await send_confirmation_email(user.email, conf_token, domain)
+    try:
+        await send_confirmation_email(user.email, conf_token, domain)
+    except Exception as e:
+        logger.error(f"Failed to send confirmation email to {user.email}: {e}")
 
     return {"message": "User registered successfully. Please check your email for confirmation."}
 
@@ -123,7 +129,10 @@ async def forgot_password(
     db.commit()
 
     domain = str(request.base_url).rstrip("/")
-    await send_reset_email(user.email, token, domain)
+    try:
+        await send_reset_email(user.email, token, domain)
+    except Exception as e:
+        logger.error(f"Failed to send reset email to {user.email}: {e}")
 
     return {"message": "Reset link sent successfully."}
 
