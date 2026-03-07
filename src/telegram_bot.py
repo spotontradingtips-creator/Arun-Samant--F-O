@@ -12,7 +12,7 @@ import psutil
 import subprocess
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
 # Add project root to path
@@ -81,6 +81,14 @@ def get_daily_pnl():
         logger.error(f"Error calculating P&L: {e}")
         return 0.0, 0.0, 0
 
+def get_control_keyboard():
+    """Returns the persistent bottom keyboard"""
+    keyboard = [
+        ["🚀 START BOT", "🛑 STOP BOT"],
+        ["📊 PERFORMANCE", "🔄 REFRESH"]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
 # --- Command Handlers ---
 
 async def restricted_access(update: Update):
@@ -93,20 +101,15 @@ async def restricted_access(update: Update):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await restricted_access(update): return
 
-    keyboard = [
-        [InlineKeyboardButton("START BOT", callback_data='start_bot'),
-         InlineKeyboardButton("STOP BOT", callback_data='stop_bot')],
-        [InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
-         InlineKeyboardButton("REFRESH STATUS", callback_data='status_check')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = get_control_keyboard()
     
     status = "RUNNING" if is_bot_running() else "STOPPED"
     await update.message.reply_text(
         f"**SENTINEL COMMAND CENTER**\n\n"
         f"**SYSTEM STATUS**: {status}\n"
         f"**TIME**: {now_ist().strftime('%H:%M:%S')}\n"
-        f"----------------------------",
+        f"----------------------------\n"
+        f"Use the persistent keyboard below to control the bot.",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -179,20 +182,67 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- OTP & Message Handlers ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles text messages (for OTP entry)"""
+    """Handles text messages (from persistent keyboard or manual entry)"""
     if not await restricted_access(update): return
     
     msg_text = update.message.text.strip()
     
-    # Check if this looks like a 6-digit OTP
-    if len(msg_text) == 6 and msg_text.isdigit():
+    # 1. HANDLE PERSISTENT KEYBOARD COMMANDS
+    if msg_text == "🚀 START BOT":
+        if is_bot_running():
+            await update.message.reply_text("BOT IS ALREADY RUNNING.")
+        else:
+            await update.message.reply_text("INITIATING BOOT SEQUENCE...")
+            subprocess.Popen([sys.executable, BOT_SCRIPT], 
+                             creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+            await asyncio.sleep(3)
+            await update.message.reply_text("BOT STARTED SUCCESSFULLY.")
+
+    elif msg_text == "🛑 STOP BOT":
+        if not is_bot_running():
+            await update.message.reply_text("BOT IS NOT RUNNING.")
+        else:
+            proc = get_bot_process()
+            if proc:
+                proc.terminate()
+                await update.message.reply_text("SHUTTING DOWN...")
+                await asyncio.sleep(1)
+                await update.message.reply_text("BOT STOPPED.")
+            else:
+                await update.message.reply_text("FAILED TO STOP BOT.")
+
+    elif msg_text == "📊 PERFORMANCE":
+        active, closed, count = get_daily_pnl()
+        total = active + closed
+        msg = (
+            f"**FINANCIAL DEBRIEF**\n\n"
+            f"Active Pos: {count}\n"
+            f"Closed P&L: Rs {closed:,.2f}\n"
+            f"Active P&L: Rs {active:,.2f}\n"
+            f"--------------------------------\n"
+            f"**TOTAL P&L: Rs {total:,.2f}**"
+        )
+        await update.message.reply_text(msg, parse_mode='Markdown')
+
+    elif msg_text == "🔄 REFRESH":
+        status = "RUNNING" if is_bot_running() else "STOPPED"
+        await update.message.reply_text(
+            f"**SENTINEL COMMAND CENTER**\n\n"
+            f"**SYSTEM STATUS**: {status}\n"
+            f"**TIME**: {now_ist().strftime('%H:%M:%S')}",
+            parse_mode='Markdown'
+        )
+
+    # 2. HANDLE OTP ENTRY (6-digit)
+    elif len(msg_text) == 6 and msg_text.isdigit():
         if OTPManager.check_for_pending_request():
             OTPManager.provide_otp(msg_text)
             await update.message.reply_text(f"OTP {msg_text} received and forwarded to trading bot.")
         else:
-            await update.message.reply_text("No active OTP request found. Are you sure you need to send this?")
+            await update.message.reply_text("No active OTP request found.")
+    
     else:
-        await update.message.reply_text("Unknown command. Use /start to see the menu.")
+        await update.message.reply_text("Use buttons below to control the bot or type /start to reset menu.")
 
 async def check_otp_requests(bot):
     """Background task to notify user if an OTP is needed"""
