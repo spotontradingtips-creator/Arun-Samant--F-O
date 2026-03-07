@@ -16,13 +16,13 @@ import subprocess
 import psutil
 from src.utils import setup_logging
 
-# Initialize Logger
-logger = setup_logging()
+# Initialize Logger (Isolated)
+logger = setup_logging(log_file="logs/dashboard.log")
 
 # FORCE DARK THEME AND WIDE LAYOUT
 st.set_page_config(
     page_title="SENTINEL HUB | F&O BOT", 
-    page_icon=":target:",
+    page_icon="terminal",
     layout="wide",
     initial_sidebar_state="expanded"
 )

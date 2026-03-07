@@ -18,6 +18,7 @@ from src.utils import now_ist, get_current_time_ist, calculate_pnl, calculate_pn
 from src.symbol_master import SymbolMaster
 from src.persistence import StateManager
 from src.trading_models import TradeType, ExitReason, Position
+from src.notifications import notify_trade_entry, notify_trade_exit
 
 from rich.table import Table
 from rich.panel import Panel
@@ -118,6 +119,12 @@ class FnOTradingBot:
         if not hasattr(self, 'closed_trades'):
             self.closed_trades = []
 
+        # Condition 0: Daily Profit Cap (HARDCODED: 1200/-)
+        with self.lock:
+            if self.daily_pnl >= 1200.0:
+                logger.info(f"{underlying} [CE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= 1200.0) - Stopping for today")
+                return False
+
         # Condition 1: No duplicate positions
         with self.lock:
             if underlying in self.positions:
@@ -164,12 +171,6 @@ class FnOTradingBot:
         # Condition 3: VIX filter
         if vix < self.config.vix_min_threshold:
             logger.info(f"{underlying} [CE]: VIX too low ({vix:.2f} < {self.config.vix_min_threshold})")
-            return False
-        
-        # Condition 3b: Daily Profit Cap (Hardcoded Default: Rs 1200)
-        daily_pnl = getattr(self, 'daily_pnl', 0.0)
-        if daily_pnl >= self.config.daily_profit_limit:
-            logger.info(f"{underlying} [CE]: Daily Profit Target (Rs {self.config.daily_profit_limit}) Reached. Trading paused until tomorrow.")
             return False
         
         # Get current row data
@@ -271,6 +272,12 @@ class FnOTradingBot:
         if not hasattr(self, 'closed_trades'):
             self.closed_trades = []
 
+        # Condition 0: Daily Profit Cap (HARDCODED: 1200/-)
+        with self.lock:
+            if self.daily_pnl >= 1200.0:
+                logger.info(f"{underlying} [PE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= 1200.0) - Stopping for today")
+                return False
+
         # Condition 1: No duplicate positions
         with self.lock:
             if underlying in self.positions:
@@ -319,12 +326,6 @@ class FnOTradingBot:
             logger.info(f"{underlying} [PE]: VIX too low ({vix:.2f} < {self.config.vix_min_threshold})")
             return False
             
-        # Condition 3b: Daily Profit Cap (Hardcoded Default: Rs 1200)
-        daily_pnl = getattr(self, 'daily_pnl', 0.0)
-        if daily_pnl >= self.config.daily_profit_limit:
-            logger.info(f"{underlying} [PE]: Daily Profit Target (Rs {self.config.daily_profit_limit}) Reached. Trading paused until tomorrow.")
-            return False
-        
         # Get current row data
         current_row = intraday_data.iloc[current_row_idx]
         
@@ -464,6 +465,15 @@ Returns:
             f"Qty: [bold white]{lot_size}[/bold white]"
         )
         
+        # SEND TELEGRAM ALERT
+        notify_trade_entry(
+            underlying=underlying,
+            trade_type=trade_type.value,
+            premium=entry_price,
+            spot=entry_underlying_price,
+            strike=strike_price if strike_price else 0
+        )
+        
         return position
     
     def check_exit_conditions(
@@ -514,8 +524,8 @@ Returns:
         if position.check_sl_hit(current_underlying_price):
             return ExitReason.STOP_LOSS
         
-        # Priority 2: Profit Target (HARDCODED: Rs 250.0)
-        if position.check_profit_hit(current_premium, 250.0):
+        # Priority 2: Profit Target (HARDCODED: Rs 350.0)
+        if position.check_profit_hit(current_premium, 350.0):
             return ExitReason.PROFIT_TARGET
         
         # Priority 3: TREND REVERSAL (Immediate Exit)
@@ -611,6 +621,15 @@ Returns:
             f"P&L: [{pnl_style}]Rs {position.pnl:,.2f} ({position.pnl_percentage:+.2f}%)[/{pnl_style}]"
         )
         
+        # SEND TELEGRAM ALERT
+        notify_trade_exit(
+            underlying=underlying,
+            exit_reason=exit_reason.value,
+            pnl=position.pnl,
+            daily_pnl=self.daily_pnl,
+            exit_premium=exit_price
+        )
+        
         return position
     
     def get_account_summary(self) -> Dict:
@@ -641,32 +660,36 @@ Returns:
     
     def print_account_summary(self):
         """Print formatted account summary using Rich table"""
-        summary = self.get_account_summary()
-        
-        table = Table(title="ACCOUNT PERFORMANCE SUMMARY", box=box.DOUBLE_EDGE, header_style="bold cyan")
-        table.add_column("Metric", style="dim")
-        table.add_column("Value", justify="right")
-        
-        table.add_row("Initial Capital", f"Rs {summary['initial_capital']:,.2f}")
-        table.add_row("Current Capital", f"Rs {summary['current_capital']:,.2f}")
-        
-        pnl_style = "bold green" if summary['total_pnl'] >= 0 else "bold red"
-        table.add_row("Total P&L", f"[{pnl_style}]Rs {summary['total_pnl']:+,.2f} ({summary['total_pnl_pct']:+.2f}%)[/{pnl_style}]")
-        
-        daily_pnl_style = "bold green" if summary['daily_pnl'] >= 0 else "bold red"
-        table.add_row("Daily P&L", f"[{daily_pnl_style}]Rs {summary['daily_pnl']:+,.2f}[/{daily_pnl_style}]")
-        
-        table.add_section()
-        table.add_row("Total Trades", str(summary['total_trades']))
-        table.add_row("Winning Trades", f"[green]{summary['winning_trades']}[/green]")
-        table.add_row("Losing Trades", f"[red]{summary['losing_trades']}[/red]")
-        table.add_row("Win Rate", f"[bold cyan]{summary['win_rate']:.2f}%[/bold cyan]")
-        
-        table.add_section()
-        table.add_row("Active Positions", str(summary['open_positions']))
-        table.add_row("Daily Trades", str(summary['daily_trades']))
-        
-        console.print("\n", table, "\n")
+        try:
+            summary = self.get_account_summary()
+            
+            # Use ASCII box for maximum compatibility on all Windows terminals
+            table = Table(title="ACCOUNT PERFORMANCE SUMMARY", box=box.ASCII, header_style="bold cyan")
+            table.add_column("Metric", style="dim")
+            table.add_column("Value", justify="right")
+            
+            table.add_row("Initial Capital", f"Rs {summary['initial_capital']:,.2f}")
+            table.add_row("Current Capital", f"Rs {summary['current_capital']:,.2f}")
+            
+            pnl_style = "bold green" if summary['total_pnl'] >= 0 else "bold red"
+            table.add_row("Total P&L", f"[{pnl_style}]Rs {summary['total_pnl']:+,.2f} ({summary['total_pnl_pct']:+.2f}%)[/{pnl_style}]")
+            
+            daily_pnl_style = "bold green" if summary['daily_pnl'] >= 0 else "bold red"
+            table.add_row("Daily P&L", f"[{daily_pnl_style}]Rs {summary['daily_pnl']:+,.2f}[/{daily_pnl_style}]")
+            
+            table.add_section()
+            table.add_row("Total Trades", str(summary['total_trades']))
+            table.add_row("Winning Trades", f"[green]{summary['winning_trades']}[/green]")
+            table.add_row("Losing Trades", f"[red]{summary['losing_trades']}[/red]")
+            table.add_row("Win Rate", f"[bold cyan]{summary['win_rate']:.2f}%[/bold cyan]")
+            
+            table.add_section()
+            table.add_row("Active Positions", str(summary['open_positions']))
+            table.add_row("Daily Trades", str(summary['daily_trades']))
+            
+            console.print("\n", table, "\n")
+        except Exception as e:
+            logger.error(f"Error printing account summary: {e}")
     
     def save_trades_to_csv(self, filename: str):
         """Save all closed trades to CSV file"""

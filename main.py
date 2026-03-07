@@ -25,7 +25,6 @@ from src.option_selector import OptionSelector
 from src.order_manager import OrderManager
 from src.symbol_master import SymbolMaster
 from src.position_sync import sync_positions_from_broker
-from src.position_sync import sync_positions_from_broker
 
 from rich.panel import Panel
 from rich.live import Live
@@ -122,22 +121,28 @@ def get_market_data_with_indicators(
         bar_start = current_time.replace(minute=current_time.minute - current_time.minute % 15, second=0, microsecond=0)
         
         if current_spot > 0:
-            # Use current spot price as close, last candle's close as open
-            last_close = intraday_df.iloc[-1]['close']
-            
-            # Use last candle's high/low if current spot is within that range, 
-            # otherwise expand to current spot
-            
-            # Build live candle
-            live_candle = pd.DataFrame({
-                'open': [last_close],
-                'high': [max(last_close, current_spot)],
-                'low': [min(last_close, current_spot)],
-                'close': [current_spot]
-            }, index=[bar_start])
-            
-            # Append live candle to historical data
-            intraday_df_live = pd.concat([intraday_df, live_candle])
+            # CHECK FOR DOUBLE COUNTING: If bar_start already exists in intraday_df, update it.
+            # This happens when yfinance/broker already provided the current candle.
+            if bar_start in intraday_df.index:
+                intraday_df_live = intraday_df.copy()
+                intraday_df_live.loc[bar_start, 'close'] = current_spot
+                intraday_df_live.loc[bar_start, 'high'] = max(intraday_df_live.loc[bar_start, 'high'], current_spot)
+                intraday_df_live.loc[bar_start, 'low'] = min(intraday_df_live.loc[bar_start, 'low'], current_spot)
+                # Note: keeping original open to avoid skewing
+            else:
+                # Use current spot price as close, last candle's close as open
+                last_close = intraday_df.iloc[-1]['close']
+                
+                # Build live candle
+                live_candle = pd.DataFrame({
+                    'open': [last_close],
+                    'high': [max(last_close, current_spot)],
+                    'low': [min(last_close, current_spot)],
+                    'close': [current_spot]
+                }, index=[bar_start])
+                
+                # Append live candle to historical data
+                intraday_df_live = pd.concat([intraday_df, live_candle])
         else:
             intraday_df_live = intraday_df
             if current_spot == 0:
@@ -178,14 +183,27 @@ def exit_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Orde
     # Track consecutive bad ticks for safety exits
     safety_counts = {} # {position_id: count}
     
+    # Periodic Sync Timer
+    last_sync_time = time.time()
+    sync_interval = 300 # 5 minutes
+    
     while not shutdown_event.is_set():
         try:
             # Check if market closed
-            current_time = now_ist().time()
-            if current_time > config.market_close:
+            current_time_dt = now_ist().time() # Use a different variable name to avoid conflict with time.time()
+            if current_time_dt > config.market_close:
                 logger.info("EXIT THREAD: Market closed")
                 break
             
+            # PERIODIC BROKER SYNC (Every 5 minutes)
+            # This picks up manual trades or recovers from transient 500 errors
+            current_time_ts = time.time() # Timestamp for sync interval
+            # logger.debug(f"Sync Timer: {current_time_ts - last_sync_time:.1f}s / {sync_interval}s")
+            if current_time_ts - last_sync_time >= sync_interval:
+                logger.info("!!! TRIGGERING PERIODIC POSITIONS SYNC !!!")
+                sync_positions_from_broker(bot, api)
+                last_sync_time = current_time_ts
+
             # Check each active position
             with bot.lock:
                 underlyings = list(bot.positions.keys())
@@ -270,8 +288,8 @@ def exit_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Orde
                             logger.warning(f"EXIT THREAD: STOP LOSS HIT for {underlying}")
                             exit_reason = ExitReason.STOP_LOSS
                             
-                        # 3. Profit Target (HARDCODED: Rs 250.0)
-                        elif position.check_profit_hit(current_premium, 250.0):
+                        # 3. Profit Target (HARDCODED: Rs 350.0)
+                        elif position.check_profit_hit(current_premium, 350.0):
                             logger.info(f"EXIT THREAD: PROFIT TARGET HIT for {underlying}")
                             exit_reason = ExitReason.PROFIT_TARGET
                 
@@ -376,8 +394,8 @@ def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Ord
                     current_profit_pct = position.calculate_pnl_pct(current_premium)
                     current_pnl = position.calculate_pnl(current_premium)
                     
-                    # Only check reversal if profit < target amount (HARDCODED: 250.0)
-                    if current_pnl < 250.0:
+                    # Only check reversal if profit < target amount (HARDCODED: 350.0)
+                    if current_pnl < 350.0:
                         # Check for MACD reversal on CONFIRMED CANDLE ONLY
                         check_idx = current_row_idx - 1
                         
@@ -587,6 +605,15 @@ def run_live_trading(symbols_config: dict):
     
     # Initialize API, bot, and order manager
     api = MStockAPI()
+    
+    # Ensure session is valid (Try remote OTP if 401)
+    if config.live_trading:
+        if not api.ensure_session_is_valid():
+            logger.error("!!! CRITICAL: Failed to establish valid broker session even after remote OTP attempt !!!")
+            logger.error("System will shut down in 10 seconds. Check credentials and OTP flow.")
+            time.sleep(10)
+            return
+            
     bot = FnOTradingBot(config)
     order_manager = OrderManager()
     
@@ -598,6 +625,10 @@ def run_live_trading(symbols_config: dict):
     
     # Wait for market to open
     wait_for_market_open()
+    
+    # IMMEDIATE SYNC after market open (pick up positions as soon as API is ready)
+    logger.info("Market Open! Triggering immediate position sync...")
+    sync_positions_from_broker(bot, api)
     
     try:
         # Start both monitoring threads
@@ -629,15 +660,18 @@ def run_live_trading(symbols_config: dict):
         
     finally:
         # Final summary
-        logger.info("\n" + "="*60)
-        logger.info(f"{mode} SESSION COMPLETE")
-        logger.info("="*60)
-        bot.print_account_summary()
-        
-        # Save trades
-        suffix = "live" if config.live_trading else "paper"
-        output_file = f"logs/{suffix}_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        bot.save_trades_to_csv(output_file)
+        try:
+            logger.info("\n" + "="*60)
+            logger.info(f"{mode} SESSION COMPLETE")
+            logger.info("="*60)
+            bot.print_account_summary()
+            
+            # Save trades
+            suffix = "live" if config.live_trading else "paper"
+            output_file = f"logs/{suffix}_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            bot.save_trades_to_csv(output_file)
+        except Exception as e:
+            logger.error(f"Error during session shutdown/summary: {e}")
 
 
 def load_symbols_from_config():

@@ -61,7 +61,6 @@ class TradingConfig:
     
     # Profit Targets (Based on AMOUNT, editable)
     profit_target_amount: float = 500.0    # Profit target in Rs (Fixed Rule)
-    daily_profit_limit: float = 1200.0     # Daily profit cap in Rs (Stop for day if reached)
     
     # Safety Net (Max Premium Loss)
     max_premium_loss_percent: float = -50.0 # Force exit if premium drops by this %
@@ -156,7 +155,6 @@ class TradingConfig:
                 # Support both old key 'profit_target_percent' (convert to value? no, just default) 
                 # and new key 'profit_target_amount'
                 self.profit_target_amount = config_data['profit_targets'].get('profit_target_amount', self.profit_target_amount)
-                self.daily_profit_limit = config_data['profit_targets'].get('daily_profit_limit', self.daily_profit_limit)
             
             # Load lot sizes
             if 'lot_sizes' in config_data:

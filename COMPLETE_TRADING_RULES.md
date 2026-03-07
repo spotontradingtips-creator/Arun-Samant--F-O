@@ -5,7 +5,7 @@
 
 ---
 
-## 📊 ENTRY CONDITIONS (BUY)
+##  ENTRY CONDITIONS (BUY)
 
 All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to execute.
 
@@ -14,7 +14,7 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 | # | Condition | Value | Notes |
 |---|-----------|-------|-------|
 | 1 | **Trading Hours** | 09:15 AM - 03:15 PM | No new entries after 3:15 PM |
-| 2 | **VIX Minimum** | ≥ 10.0 | Skip trading if VIX too low |
+| 2 | **VIX Minimum** |  10.0 | Skip trading if VIX too low |
 | 3 | **No Duplicate Position** | Max 1 position per index | Cannot have multiple positions in same underlying |
 | 4 | **No Duplicate Signal** | Fresh crossover required | Won't re-enter on same candle |
 | 5 | **15m RSI Range** | 30.0 to 65.0 | Momentum must be in range |
@@ -32,8 +32,8 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 | **Momentum** | **Dark Green** | Histogram > 0 AND Histogram > Previous |
 
 **Strict Anti-Duplication**:
-- ❌ Cannot re-enter the **EXACT SAME** Option Strike/Symbol if already traded today.
-- ✅ CAN enter a **different** strike if the trend continues.
+-  Cannot re-enter the **EXACT SAME** Option Strike/Symbol if already traded today.
+-  CAN enter a **different** strike if the trend continues.
 
 ### PUT (PE) Specific Conditions
 
@@ -45,12 +45,12 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 | **Momentum** | **Dark Red** | Histogram < 0 AND Histogram < Previous |
 
 **Strict Anti-Duplication**:
-- ❌ Cannot re-enter the **EXACT SAME** Option Strike/Symbol if already traded today.
-- ✅ CAN enter a **different** strike if the trend continues.
+-  Cannot re-enter the **EXACT SAME** Option Strike/Symbol if already traded today.
+-  CAN enter a **different** strike if the trend continues.
 
 ---
 
-## 🎯 STRIKE SELECTION
+##  STRIKE SELECTION
 
 Controlled by `strike_depth` parameter in `config.json`:
 
@@ -64,7 +64,7 @@ Controlled by `strike_depth` parameter in `config.json`:
 
 ---
 
-## 🚪 EXIT CONDITIONS (SELL)
+##  EXIT CONDITIONS (SELL)
 
 Checked **every 1 second** in **priority order**:
 
@@ -131,22 +131,22 @@ Exit if **PREVIOUS 15-min Candle** closed with:
 
 ---
 
-## 💰 PROFIT & LOSS CALCULATION
+##  PROFIT & LOSS CALCULATION
 
 ### How Profit is Calculated
 
 **Formula**:
 ```
-P&L (Rs) = (Exit Premium - Entry Premium) × Lot Size
-P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium) × 100
+P&L (Rs) = (Exit Premium - Entry Premium)  Lot Size
+P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
 ```
 
 **Example - NIFTY CALL**:
 - Entry Premium: Rs 100
 - Exit Premium: Rs 105
 - Lot Size: 65
-- **P&L**: (105 - 100) × 65 = **Rs 325**
-- **P&L %**: ((105 - 100) / 100) × 100 = **5.0%**
+- **P&L**: (105 - 100)  65 = **Rs 325**
+- **P&L %**: ((105 - 100) / 100)  100 = **5.0%**
 
 ### How Loss is Calculated
 
@@ -155,16 +155,16 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium) × 100
 **Example - NIFTY CALL with 0.70% SL**:
 - Entry Spot: 25,000
 - Current Spot: 24,825 (dropped 175 points = 0.70%)
-- **Stop Loss TRIGGERED** → Exit at current premium
+- **Stop Loss TRIGGERED**  Exit at current premium
 
 **Example - BANKNIFTY PUT with 1.20% SL**:
 - Entry Spot: 50,000
 - Current Spot: 50,600 (rose 600 points = 1.20%)
-- **Stop Loss TRIGGERED** → Exit at current premium
+- **Stop Loss TRIGGERED**  Exit at current premium
 
 ---
 
-## 📈 LOT SIZES & POSITION SIZING
+##  LOT SIZES & POSITION SIZING
 
 | Index | Lot Size | Number of Lots | Total Quantity |
 |-------|----------|----------------|----------------|
@@ -179,7 +179,7 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium) × 100
 
 ---
 
-## 📊 TECHNICAL INDICATOR SETTINGS
+##  TECHNICAL INDICATOR SETTINGS
 
 ### MACD Parameters
 | Parameter | Value |
@@ -203,7 +203,7 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium) × 100
 
 ---
 
-## ⏰ TRADING HOURS
+##  TRADING HOURS
 
 | Event | Time (IST) | Description |
 |-------|------------|-------------|
@@ -213,18 +213,18 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium) × 100
 
 ---
 
-## 💼 CAPITAL MANAGEMENT
+##  CAPITAL MANAGEMENT
 
 | Parameter | Value |
 |-----------|-------|
 | **Initial Capital** | Rs 1,00,000 |
 | **Daily Loss Limit** | 5.0% (Rs 5,000) |
-| **Daily Profit Cap** | Rs 1,200 |
+| **Daily Profit Cap** | **REMOVED** | No automatic stop on profit |
 | **Trading Mode** | LIVE (Real orders) |
 
 ---
 
-## 🔄 RE-ENTRY LOGIC
+##  RE-ENTRY LOGIC
 
 ### First Trade of Day
 - **Relaxed Entry**: Enters if trend is active (MACD > Signal for CE, MACD < Signal for PE)
@@ -237,48 +237,48 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium) × 100
 
 ---
 
-## 📝 SUMMARY OF KEY RULES
+##  SUMMARY OF KEY RULES
 
 ### Entry Decision
-✅ All 7 common conditions must be TRUE  
-✅ MACD signal appropriate for trade type (CE/PE)  
-✅ First trade = Relaxed, Subsequent = Relaxed (Trend Active)
+ All 7 common conditions must be TRUE  
+ MACD signal appropriate for trade type (CE/PE)  
+ First trade = Relaxed, Subsequent = Relaxed (Trend Active)
  
  ### Exit Decision (Priority Order)
- 1. **Stop Loss** → Based on spot movement (VIX-adjusted)
- 2. **Profit Target** → Based on hardcoded amount (Rs 250.0)
- 3. **Trend Reversal** → MACD or DI crossover against position
+ 1. **Stop Loss**  Based on spot movement (VIX-adjusted)
+ 2. **Profit Target**  Based on hardcoded amount (Rs 250.0)
+ 3. **Trend Reversal**  MACD or DI crossover against position
 
 ### Profit/Loss Basis
 - **Profit Target**: Calculated as **FIXED AMOUNT (Rs 250.0)**
 - **Stop Loss**: Triggered by **UNDERLYING SPOT MOVEMENT** (0.7%-1.5% depending on index and VIX)
-- **Final P&L**: Difference in premium × lot size
+- **Final P&L**: Difference in premium  lot size
 
 ---
 
-## 🎛️ EDITABLE PARAMETERS
+##  EDITABLE PARAMETERS
 
 All these can be changed in [`config.json`](file:///c:/Antigravity/Arun%20Samant%20-%20F&O/config.json):
 
-- ✏️ Profit target percentage
-- ✏️ Stop loss percentages (per index, per VIX range)
-- ✏️ Lot sizes and number of lots
-- ✏️ RSI range (min/max)
-- ✏️ ADX thresholds
-- ✏️ VIX minimum threshold
-- ✏️ Trading hours
-- ✏️ Strike depth (ATM/ITM)
-- ✏️ Daily loss limit
+-  Profit target percentage
+-  Stop loss percentages (per index, per VIX range)
+-  Lot sizes and number of lots
+-  RSI range (min/max)
+-  ADX thresholds
+-  VIX minimum threshold
+-  Trading hours
+-  Strike depth (ATM/ITM)
+-  Daily loss limit
 
 ---
 
-## 📍 Current Active Settings
+##  Current Active Settings
 
 From your [`config.json`](file:///c:/Antigravity/Arun%20Samant%20-%20F&O/config.json):
-- **Live Trading**: ✅ ENABLED
+- **Live Trading**:  ENABLED
 - **Strike Depth**: 0 (ATM)
 - **Profit Target**: Rs 250.0 (Hardcoded)
-- **Daily Profit Cap**: Rs 1,200 (Stop for day if reached)
+- **Daily Profit Cap**: **DISABLED** (No automatic stop)
 - **NIFTY SL**: 0.7% (base)
 - **BANKNIFTY SL**: 1.2% (base)
 - **FINNIFTY SL**: 1.0% (base)
@@ -289,7 +289,7 @@ From your [`config.json`](file:///c:/Antigravity/Arun%20Samant%20-%20F&O/config.
 
 ---
 
-## 🧠 BOT MEMORY & PERSISTENCE
+##  BOT MEMORY & PERSISTENCE
 
 The bot uses a **Dual-Layer Memory System** to ensure safety across restarts:
 

@@ -77,19 +77,26 @@ class LiveIndicators:
             
             # Create a new row for the current forming candle
             if spot_price > 0:
-                # Use current spot price as close, and last candle's close as open
-                last_close = intraday_df.iloc[-1]['close']
-                
-                # Build live candle (open=last close, high/low/close=current price estimate)
-                live_candle = pd.DataFrame({
-                    'open': [last_close],
-                    'high': [max(last_close, spot_price)],
-                    'low': [min(last_close, spot_price)],
-                    'close': [spot_price]
-                }, index=[bar_start])
-                
-                # Append live candle to historical data
-                intraday_df_live = pd.concat([intraday_df, live_candle])
+                # CHECK FOR DOUBLE COUNTING: If bar_start already exists in intraday_df, update it.
+                if bar_start in intraday_df.index:
+                    intraday_df_live = intraday_df.copy()
+                    intraday_df_live.loc[bar_start, 'close'] = spot_price
+                    intraday_df_live.loc[bar_start, 'high'] = max(intraday_df_live.loc[bar_start, 'high'], spot_price)
+                    intraday_df_live.loc[bar_start, 'low'] = min(intraday_df_live.loc[bar_start, 'low'], spot_price)
+                else:
+                    # Use current spot price as close, and last candle's close as open
+                    last_close = intraday_df.iloc[-1]['close']
+                    
+                    # Build live candle (open=last close, high/low/close=current price estimate)
+                    live_candle = pd.DataFrame({
+                        'open': [last_close],
+                        'high': [max(last_close, spot_price)],
+                        'low': [min(last_close, spot_price)],
+                        'close': [spot_price]
+                    }, index=[bar_start])
+                    
+                    # Append live candle to historical data
+                    intraday_df_live = pd.concat([intraday_df, live_candle])
             else:
                 intraday_df_live = intraday_df
             

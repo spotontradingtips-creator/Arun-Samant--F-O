@@ -1,6 +1,6 @@
 # F&O Trading Bot - Complete Implementation
 
-## 🎯 Overview
+##  Overview
 
 Your F&O trading bot is ready! This implementation combines:
 - **MACD + RSI + ADX Strategy** with 8 mandatory entry conditions
@@ -10,21 +10,21 @@ Your F&O trading bot is ready! This implementation combines:
 - **Paper Trading Mode** for safe testing
 - **Live Dashboard** for monitoring trades and P&L
 
-## 📋 Your Trading Conditions
+##  Your Trading Conditions
 
 ### Entry Conditions (8 Checks)
-✅ **1. No duplicate positions** - Max 1 position per underlying  
-✅ **2. Trading hours** - 9:25 AM - 2:30 PM IST only  
-✅ **3. VIX filter** - Skip if VIX < 10  
-✅ **4. Daily MACD** - Bullish (CE) or Bearish (PE)  
-✅ **5. Daily candle** - Green (CE) or Red (PE)  
-✅ **6. 15m MACD crossover** - Fresh crossover required  
-✅ **7. 15m RSI** - Must be in 45-65 range  
-✅ **8. 15m ADX** - Must be > 25 for trend strength  
+ **1. No duplicate positions** - Max 1 position per underlying  
+ **2. Trading hours** - 9:25 AM - 2:30 PM IST only  
+ **3. VIX filter** - Skip if VIX < 10  
+ **4. Daily MACD** - Bullish (CE) or Bearish (PE)  
+ **5. Daily candle** - Green (CE) or Red (PE)  
+ **6. 15m MACD crossover** - Fresh crossover required  
+ **7. 15m RSI** - Must be in 45-65 range  
+ **8. 15m ADX** - Must be > 25 for trend strength  
 
 3. **MACD Reversal** - Safety exit confirmed on candle close
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Install Dependencies
 ```bash
@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 ### 2. Setup Credentials (Auto-loaded)
 Your mStock credentials are automatically loaded from `.env` file.  
-**No UI input needed!** ✅
+**No UI input needed!** 
 
 `.env` file:
 ```env
@@ -77,30 +77,30 @@ config = TradingConfig()
 bot = run_backtest(daily_data, intraday_data, vix_data, config, "backtest_results.csv")
 ```
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 .
-├── src/
-│   ├── indicators.py         # MACD, RSI, ADX calculations
-│   ├── trading_config.py     # All trading parameters
-│   ├── fno_trading_bot.py    # Main trading engine
-│   ├── market_data.py        # mStock API integration
-│   └── utils.py              # Helper functions
-│
-├── main.py                   # Paper trading execution
-├── backtest.py               # Backtesting module
-│
-├── logs/                     # Trading logs and results
-├── data/                     # Historical data (for backtest)
-├── files/                    # Documentation from your original setup
-│
-├── .env                      # API credentials (create this)
-├── credentials.json          # mStock access token (auto-generated)
-└── README.md                 # This file
+ src/
+    indicators.py         # MACD, RSI, ADX calculations
+    trading_config.py     # All trading parameters
+    fno_trading_bot.py    # Main trading engine
+    market_data.py        # mStock API integration
+    utils.py              # Helper functions
+
+ main.py                   # Paper trading execution
+ backtest.py               # Backtesting module
+
+ logs/                     # Trading logs and results
+ data/                     # Historical data (for backtest)
+ files/                    # Documentation from your original setup
+
+ .env                      # API credentials (create this)
+ credentials.json          # mStock access token (auto-generated)
+ README.md                 # This file
 ```
 
-## ⚙️ Configuration
+##  Configuration
 
 Edit `src/trading_config.py` to customize:
 
@@ -124,7 +124,7 @@ rsi_period: int = 14
 adx_min: float = 25.0
 ```
 
-## 📊 Example Usage - Custom Script
+##  Example Usage - Custom Script
 
 ```python
 from src.fno_trading_bot import FnOTradingBot, TradeType
@@ -185,13 +185,13 @@ if "NIFTY50" in bot.positions:
 bot.print_account_summary()
 ```
 
-## 🔍 Monitoring & Logs
+##  Monitoring & Logs
 
 ### Console Output
 ```
-✅ NIFTY50: All CE entry conditions met | RSI=52.45 | ADX=28.32 | VIX=15.20
-🔵 ENTRY: NIFTY50_CALL_20260130104532 | Type: CALL | Premium: Rs 75.50 | Spot: 19537.45 | SL: 0.70% | Qty: 50
-🟢 EXIT: NIFTY50_CALL_20260130104532 | Reason: Profit Target 15%+ | Exit Premium: Rs 86.80 | P&L: Rs 565.00 (+15.23%) | Capital: Rs 100,565.00
+ NIFTY50: All CE entry conditions met | RSI=52.45 | ADX=28.32 | VIX=15.20
+ ENTRY: NIFTY50_CALL_20260130104532 | Type: CALL | Premium: Rs 75.50 | Spot: 19537.45 | SL: 0.70% | Qty: 50
+ EXIT: NIFTY50_CALL_20260130104532 | Reason: Profit Target 15%+ | Exit Premium: Rs 86.80 | P&L: Rs 565.00 (+15.23%) | Capital: Rs 100,565.00
 ```
 
 ### Log Files
@@ -204,7 +204,7 @@ Position_ID,Underlying,Type,Entry_Time,Entry_Price,Entry_Spot,SL_Percentage,Exit
 NIFTY50_CALL_20260130104532,NIFTY50,CALL,2026-01-30 10:45:32,75.5,19537.45,0.70,2026-01-30 11:12:18,86.8,19585.32,Profit Target 15%+,565.0,15.23,15.2
 ```
 
-## ⚠️ Important Notes
+##  Important Notes
 
 ### Paper Trading Mode
 - **Current status**: `main.py` runs in PAPER TRADING mode
@@ -213,13 +213,13 @@ NIFTY50_CALL_20260130104532,NIFTY50,CALL,2026-01-30 10:45:32,75.5,19537.45,0.70,
 - Safe for testing without risking capital
 
 ### Before Going Live
-1. ✅ Run paper trading for minimum 2 weeks
-2. ✅ Verify entry/exit signals match your expectations
-3. ✅ Check RSI/MACD values against TradingView
-4. ✅ Test during different VIX conditions
-5. ✅ Start with small capital (1-2 lakh)
-6. ✅ Update `main.py` to use actual option premiums (not simulated)
-7. ✅ Implement actual order placement (currently paper mode)
+1.  Run paper trading for minimum 2 weeks
+2.  Verify entry/exit signals match your expectations
+3.  Check RSI/MACD values against TradingView
+4.  Test during different VIX conditions
+5.  Start with small capital (1-2 lakh)
+6.  Update `main.py` to use actual option premiums (not simulated)
+7.  Implement actual order placement (currently paper mode)
 
 ### Customization for Live Trading
 To enable live order placement:
@@ -229,7 +229,7 @@ To enable live order placement:
 4. Add option strike selection logic
 5. Test with 1 lot first
 
-## 🎓 Testing Checklist
+##  Testing Checklist
 
 - [ ] Paper trade for 2 weeks minimum
 - [ ] Backtest on 60+ days of historical data
@@ -241,7 +241,7 @@ To enable live order placement:
 - [ ] Validate MACD crossover detection
 - [ ] Test VIX adjustment logic
 
-## 📞 Support
+##  Support
 
 For issues or questions:
 1. Check logs in `logs/` directory
@@ -249,18 +249,18 @@ For issues or questions:
 3. Verify `.env` credentials are correct
 4. Ensure market is open during testing
 
-## 🔐 Risk Disclaimer
+##  Risk Disclaimer
 
 This is an algorithmic trading bot. Key risks:
 - **Capital Loss**: Can lose entire capital if not monitored
 - **Slippage**: Actual execution may differ from signals
 - **API Failures**: Network/broker issues can prevent trades
-- **Strategy Risk**: Past performance ≠ future results
+- **Strategy Risk**: Past performance  future results
 - **Daily Loss Limit**: Hard stop at 3% daily loss
 
 **Always start with paper trading and small capital!**
 
-## 📈 Expected Performance
+##  Expected Performance
 
 Based on backtests (see `files/` documentation):
 - **Win Rate**: 65-70%
@@ -272,11 +272,11 @@ Based on backtests (see `files/` documentation):
 
 ---
 
-**Ready to trade! 🚀**
+**Ready to trade! **
 
 Start with:
 ```bash
 python main.py
 ```
 
-Good luck and trade safely! 📊
+Good luck and trade safely! 

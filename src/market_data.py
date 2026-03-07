@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import logging
 from urllib.parse import quote
 import pytz
+from src.otp_manager import OTPManager
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,51 @@ class MStockAPI:
             otp = input("Enter OTP sent to your registered device: ")
             return self.complete_login(otp)
         return False
+    
+    def refresh_token_remote(self) -> bool:
+        """
+        Full authentication flow (remote via Telegram)
+        Used when running in background
+        """
+        logger.info("Initiating REMOTE re-authentication...")
+        if self.initiate_login():
+            otp = OTPManager.request_otp()
+            if otp:
+                return self.complete_login(otp)
+        return False
+
+    def ensure_session_is_valid(self) -> bool:
+        """
+        Checks if the current session is valid. 
+        If 401/Unauthorized, triggers remote re-auth.
+        """
+        if not self.access_token:
+            logger.warning("No access token found. Attempting remote login...")
+            return self.refresh_token_remote()
+            
+        try:
+            # Check with a lightweight endpoint (Quote is more reliable than portfolio/holdings)
+            url = f"{self.base_url}/instruments/quote/ohlc"
+            params = {"i": "NSE:NIFTY 50"}
+            resp = requests.get(url, headers=self.get_headers(), params=params, timeout=(10, 20))
+            
+            if resp.status_code == 401:
+                logger.warning(f"Session EXPIRED (401 - Unauthorized). Triggering remote re-authentication...")
+                return self.refresh_token_remote()
+            
+            if resp.status_code != 200:
+                logger.error(f"Session validation failed with unexpected Status: {resp.status_code}")
+                # Log response body for better debugging (truncated if too long)
+                try:
+                    error_body = resp.text[:200]
+                    logger.error(f"Response Body: {error_body}")
+                except: pass
+                return False
+                
+            return True
+        except Exception as e:
+            logger.error(f"Session validation failed (Connection Error): {e}")
+            return False
     
     def get_headers(self) -> Dict[str, str]:
         """Get headers with authorization"""

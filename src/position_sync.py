@@ -39,20 +39,21 @@ def sync_positions_from_broker(bot, api: MStockAPI) -> int:
             if positions_dict is not None:
                 break
             if attempt < max_retries - 1:
-                logger.warning(f"Positions fetch failed (Attempt {attempt+1}/{max_retries}). Retrying in 2s...")
-                time.sleep(2)
+                logger.warning(f"Positions fetch failed (Attempt {attempt+1}/{max_retries}). Retrying in 3s...")
+                time.sleep(3)
         
         # CRITICAL HARDENING: Handle API Error vs Empty Portfolio
         if positions_dict is None:
-            logger.error("!!! BROKER CONNECTION BREACH (HTTP 500) !!!")
+            logger.error("!!! BROKER PORTFOLIO API ERROR (HTTP 500) !!!")
+            logger.warning("mStock portfolio endpoints are currently unreliable. This is common when the portfolio is empty or API is overloaded.")
             
             # CHECK LOCAL MEMORY
             if bot.positions:
                 logger.warning(f"ENTERING 'BLIND MONITORING' MODE: Using Local Memory for {len(bot.positions)} positions.")
-                logger.info("The bot will continue to monitor your EXIT conditions using local data until the broker recovers.")
+                logger.info("The bot will continue to monitor your EXIT coniditions using local data until the broker recovers.")
                 return len(bot.positions)
             else:
-                logger.error("NO LOCAL MEMORY FOUND. Bot is blind to carry-forward positions until API recovers.")
+                logger.error("NO LOCAL MEMORY FOUND. Bot is starting in 'Fresh State' (Blind to any manual/old positions).")
                 return 0
             
 

@@ -53,7 +53,7 @@ def fetch_and_search_master():
                 # Also specifically look for the one we failed on: 25750 with correct date
                 target = "NIFTY2621025750PE"
                 if target in line:
-                     print(f"✅ FOUND MATCH: {line.strip()}")
+                     print(f"FOUND MATCH: {line.strip()}")
                 elif "25750" in line and "NIFTY" in line and "PE" in line:
                      print(f"NEAR MATCH: {line.strip()}")
                      

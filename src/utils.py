@@ -104,6 +104,11 @@ def setup_logging(log_file: str = "trading_bot.log", level=logging.INFO):
     """
     Setup logging configuration with Rich support
     """
+    import os
+    log_dir = os.path.dirname(log_file)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        
     logging.basicConfig(
         level=level,
         format='%(message)s',
