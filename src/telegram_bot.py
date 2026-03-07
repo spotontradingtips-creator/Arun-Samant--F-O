@@ -84,8 +84,8 @@ def get_daily_pnl():
 def get_control_keyboard():
     """Returns the persistent bottom keyboard"""
     keyboard = [
-        ["🚀 START BOT", "🛑 STOP BOT"],
-        ["📊 PERFORMANCE", "🔄 REFRESH"]
+        ["START BOT", "STOP BOT"],
+        ["PERFORMANCE", "REFRESH"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -188,7 +188,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_text = update.message.text.strip()
     
     # 1. HANDLE PERSISTENT KEYBOARD COMMANDS
-    if msg_text == "🚀 START BOT":
+    if msg_text == "START BOT":
         if is_bot_running():
             await update.message.reply_text("BOT IS ALREADY RUNNING.")
         else:
@@ -198,7 +198,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(3)
             await update.message.reply_text("BOT STARTED SUCCESSFULLY.")
 
-    elif msg_text == "🛑 STOP BOT":
+    elif msg_text == "STOP BOT":
         if not is_bot_running():
             await update.message.reply_text("BOT IS NOT RUNNING.")
         else:
@@ -211,7 +211,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text("FAILED TO STOP BOT.")
 
-    elif msg_text == "📊 PERFORMANCE":
+    elif msg_text == "PERFORMANCE":
         active, closed, count = get_daily_pnl()
         total = active + closed
         msg = (
@@ -224,7 +224,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(msg, parse_mode='Markdown')
 
-    elif msg_text == "🔄 REFRESH":
+    elif msg_text == "REFRESH":
         status = "RUNNING" if is_bot_running() else "STOPPED"
         await update.message.reply_text(
             f"**SENTINEL COMMAND CENTER**\n\n"
