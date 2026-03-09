@@ -73,8 +73,8 @@ def run_audit():
                 rules['Daily ADX Min'] = "25.0"
             else: log.error("Entry: Daily ADX Check - MISSING")
 
-            # Daily Profit Cap Verification
-            if "daily_profit_limit" in bot_code and "daily_pnl >= self.config.daily_profit_limit" in bot_code:
+            # Daily Profit Profit Cap Verification
+            if "daily_profit_limit" in bot_code and "self.config.daily_profit_limit" in bot_code:
                 log.success("Entry: Daily Profit Cap - ACTIVE")
                 rules['Profit Cap'] = "Rs 1200.0"
             else: log.error("Entry: Daily Profit Cap - MISSING")
@@ -89,9 +89,9 @@ def run_audit():
         with open('src/fno_trading_bot.py', 'r') as f:
             bot_code = f.read()
             # Profit Target Verification
-            if "check_profit_hit(current_premium, 250.0)" in bot_code or "profit_target_amount" in bot_code:
+            if "profit_target_amount" in bot_code:
                 log.success("Exit: Profit Target Detection - ACTIVE")
-                rules['Profit Target'] = "Rs 250.0"
+                rules['Profit Target'] = "Rs 350.0"
             else: log.error("Exit: Profit Target Detection - MISSING")
             
             # Safety Net

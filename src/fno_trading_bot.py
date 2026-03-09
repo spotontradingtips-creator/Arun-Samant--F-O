@@ -121,8 +121,8 @@ class FnOTradingBot:
 
         # Condition 0: Daily Profit Cap (HARDCODED: 1200/-)
         with self.lock:
-            if self.daily_pnl >= 1200.0:
-                logger.info(f"{underlying} [CE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= 1200.0) - Stopping for today")
+            if self.daily_pnl >= self.config.daily_profit_limit:
+                logger.info(f"{underlying} [{trade_type}]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= {self.config.daily_profit_limit}) - Stopping for today")
                 return False
 
         # Condition 1: No duplicate positions
@@ -524,8 +524,8 @@ Returns:
         if position.check_sl_hit(current_underlying_price):
             return ExitReason.STOP_LOSS
         
-        # Priority 2: Profit Target (HARDCODED: Rs 350.0)
-        if position.check_profit_hit(current_premium, 350.0):
+        # Priority 2: Profit Target
+        if position.check_profit_hit(current_premium, self.config.profit_target_amount):
             return ExitReason.PROFIT_TARGET
         
         # Priority 3: TREND REVERSAL (Immediate Exit)

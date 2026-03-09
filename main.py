@@ -289,7 +289,7 @@ def exit_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Orde
                             exit_reason = ExitReason.STOP_LOSS
                             
                         # 3. Profit Target (HARDCODED: Rs 350.0)
-                        elif position.check_profit_hit(current_premium, 350.0):
+                        elif position.check_profit_hit(current_premium, config.profit_target_amount):
                             logger.info(f"EXIT THREAD: PROFIT TARGET HIT for {underlying}")
                             exit_reason = ExitReason.PROFIT_TARGET
                 
@@ -395,7 +395,7 @@ def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Ord
                     current_pnl = position.calculate_pnl(current_premium)
                     
                     # Only check reversal if profit < target amount (HARDCODED: 350.0)
-                    if current_pnl < 350.0:
+                    if current_pnl < config.profit_target_amount:
                         # Check for MACD reversal on CONFIRMED CANDLE ONLY
                         check_idx = current_row_idx - 1
                         
