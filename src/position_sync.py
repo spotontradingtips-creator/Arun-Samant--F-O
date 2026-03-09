@@ -249,6 +249,15 @@ def sync_positions_from_broker(bot, api: MStockAPI) -> int:
         # RECONCILIATION: Check for "Zombie" positions
         for underlying in list(bot.positions.keys()):
             if underlying not in broker_underlyings:
+                # GRACE PERIOD: Don't remove positions opened in the last 120 seconds
+                # (Prevents sync-race conditions where order is filled but not yet in holdings API)
+                pos = bot.positions[underlying]
+                time_since_entry = (now_ist() - pos.entry_time).total_seconds()
+                
+                if time_since_entry < 120:
+                    logger.info(f"Sync: {underlying} missing from broker but within GRACE PERIOD ({time_since_entry:.1f}s). Skipping removal.")
+                    continue
+
                 logger.warning(f"Position {underlying} found in State but CLOSED in Broker. Removing.")
                 bot.exit_trade(
                     underlying=underlying,

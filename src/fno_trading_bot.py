@@ -140,8 +140,8 @@ class FnOTradingBot:
             from src.option_selector import OptionSelector
             current_spot = intraday_data['close'].iloc[current_row_idx]
             
-            # Predicted strike for the potential new trade
-            target_strike = OptionSelector.get_atm_strike(current_spot, underlying)
+            # Predicted strike for the potential new trade (Accounting for ITM/OTM adjustments)
+            target_strike, _ = OptionSelector.select_option(underlying, current_spot, "CE", depth=self.config.strike_depth)
             
             # Check if we have already traded this specific strike & type today
             today_date = now_ist().date()
@@ -291,8 +291,8 @@ class FnOTradingBot:
             # Check if we have already traded this specific strike & type today
             today_date = now_ist().date()
             
-            # Predicted strike for the potential new trade
-            target_strike = OptionSelector.get_atm_strike(current_spot, underlying)
+            # Predicted strike for the potential new trade (Accounting for ITM/OTM adjustments)
+            target_strike, _ = OptionSelector.select_option(underlying, current_spot, "PE", depth=self.config.strike_depth)
             
             for trade in self.closed_trades:
                 if (trade.underlying == underlying and 
