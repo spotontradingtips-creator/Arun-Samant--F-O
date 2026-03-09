@@ -70,7 +70,7 @@
     "profit_targets": {
         "comment": "Profit target based on AMOUNT in Rs (editable)",
         "profit_target_amount": 350.0,
-        "daily_profit_limit": 1200.0
+        "daily_profit_limit": 999999.0
     },
     "lot_sizes": {
         "NIFTY50": {

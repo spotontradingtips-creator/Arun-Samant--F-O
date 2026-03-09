@@ -122,7 +122,7 @@ class FnOTradingBot:
         # Condition 0: Daily Profit Cap (HARDCODED: 1200/-)
         with self.lock:
             if self.daily_pnl >= self.config.daily_profit_limit:
-                logger.info(f"{underlying} [{trade_type}]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= {self.config.daily_profit_limit}) - Stopping for today")
+                logger.info(f"{underlying} [CE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= {self.config.daily_profit_limit}) - Stopping for today")
                 return False
 
         # Condition 1: No duplicate positions
@@ -274,8 +274,8 @@ class FnOTradingBot:
 
         # Condition 0: Daily Profit Cap (HARDCODED: 1200/-)
         with self.lock:
-            if self.daily_pnl >= 1200.0:
-                logger.info(f"{underlying} [PE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= 1200.0) - Stopping for today")
+            if self.daily_pnl >= self.config.daily_profit_limit:
+                logger.info(f"{underlying} [PE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= {self.config.daily_profit_limit}) - Stopping for today")
                 return False
 
         # Condition 1: No duplicate positions

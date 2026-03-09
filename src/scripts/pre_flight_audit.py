@@ -111,8 +111,20 @@ def run_audit():
     
     # 2. Risk Management
     print("\n  [Risk Parameters]")
-    print(f"  Profit Target............ : {rules.get('Profit Target', 'Rs 250.0')}")
-    print(f"  Daily Profit Cap......... : {rules.get('Profit Cap', 'Rs 1200.0')}")
+    try:
+        if os.path.exists('config.json'):
+            with open('config.json', 'r') as f:
+                cfg = json.load(f)
+                pt = cfg.get('profit_targets', {}).get('profit_target_amount', 350.0)
+                pl = cfg.get('profit_targets', {}).get('daily_profit_limit', 1200.0)
+                print(f"  Profit Target............ : Rs {pt}")
+                print(f"  Daily Profit Cap......... : Rs {pl}")
+        else:
+            print(f"  Profit Target............ : {rules.get('Profit Target', 'Rs 350.0')}")
+            print(f"  Daily Profit Cap......... : {rules.get('Profit Cap', 'Rs 1200.0')}")
+    except:
+        print(f"  Profit Target............ : {rules.get('Profit Target', 'Rs 350.0')}")
+        print(f"  Daily Profit Cap......... : {rules.get('Profit Cap', 'Rs 1200.0')}")
     print(f"  Safety Net (Premium)..... : {rules.get('Safety Net', '-50.0%')}")
     print("  Stop Loss (NIFTY)........ : 0.70% (Spot)")
     print("  Stop Loss (BANKNIFTY).... : 1.20% (Spot)")

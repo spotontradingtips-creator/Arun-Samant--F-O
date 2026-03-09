@@ -150,13 +150,13 @@ class OptionSelector:
         # CE (Call): Buying ITM means LOWER strike (e.g., Spot 20000, ATM 20000, ITM1 19950)
         # PE (Put): Buying ITM means HIGHER strike (e.g., Spot 20000, ATM 20000, ITM1 20050)
         
-        if option_type == "CE":
+        if option_type in ["CE", "CALL"]:
             selected_strike = atm_strike - (depth * interval)
             # NEVER OTM logic: For CE, strike must be <= spot_price
             if selected_strike > spot_price:
                 logger.info(f"  [STRIKE ADJUST] Closest strike {selected_strike} is OTM for CE. Shifting to {selected_strike - interval} (ITM/ATM)")
                 selected_strike -= interval
-        else: # PE
+        else: # PE or PUT
             selected_strike = atm_strike + (depth * interval)
             # NEVER OTM logic: For PE, strike must be >= spot_price
             if selected_strike < spot_price:
