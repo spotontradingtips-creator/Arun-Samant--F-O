@@ -60,11 +60,14 @@ class TradingConfig:
     })
     
     # Profit Targets (Based on AMOUNT, editable)
-    profit_target_amount: float = 500.0    # Profit target in Rs (Fixed Rule)
-    daily_profit_limit: float = 1200.0    # Daily profit limit in Rs
+    profit_target_amount: float = 350.0    # Profit target in Rs (Fixed Rule)
     
     # Safety Net (Max Premium Loss)
     max_premium_loss_percent: float = -50.0 # Force exit if premium drops by this %
+    
+    # Data Stability Guard (NEW: Hardcoded Safety)
+    # Maximum allowed divergence between live price and historical data/broker feeds
+    data_stability_threshold_pct: float = 0.10 # 0.1% max divergence (e.g. 23 pts for Nifty)
     
     # Technical Indicator Periods
     macd_fast: int = 12
@@ -156,7 +159,7 @@ class TradingConfig:
                 # Support both old key 'profit_target_percent' (convert to value? no, just default) 
                 # and new key 'profit_target_amount'
                 self.profit_target_amount = config_data['profit_targets'].get('profit_target_amount', self.profit_target_amount)
-                self.daily_profit_limit = config_data['profit_targets'].get('daily_profit_limit', 1200.0)
+                self.daily_profit_limit = 999999.0 # Effectively disabled
             
             # Load lot sizes
             if 'lot_sizes' in config_data:

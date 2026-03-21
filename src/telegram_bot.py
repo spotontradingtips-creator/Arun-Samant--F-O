@@ -59,6 +59,23 @@ def get_bot_process():
 def is_bot_running():
     return get_bot_process() is not None
 
+def check_single_instance():
+    """Ensure only one instance of telegram_bot.py is running."""
+    current_pid = os.getpid()
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.info['pid'] == current_pid:
+                continue
+            name = proc.info.get('name', '').lower()
+            if 'python' not in name:
+                continue
+            cmd = proc.info.get('cmdline') or []
+            if any('telegram_bot.py' in arg for arg in cmd):
+                print(f"Another instance of telegram_bot.py is already running (PID: {proc.info['pid']}). Exiting.")
+                sys.exit(1)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
 def get_daily_pnl():
     """Calculate daily P&L from persistence state"""
     try:
@@ -103,14 +120,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = get_control_keyboard()
     
+    # Send persistent keyboard first safely
+    await update.message.reply_text("Re-initializing Sentinel... (Bottom menu restored)", reply_markup=reply_markup)
+    
     status = "RUNNING" if is_bot_running() else "STOPPED"
-    await update.message.reply_text(
-        f"**SENTINEL COMMAND CENTER**\n\n"
-        f"**SYSTEM STATUS**: {status}\n"
-        f"**TIME**: {now_ist().strftime('%H:%M:%S')}\n"
-        f"----------------------------\n"
-        f"Use the persistent keyboard below to control the bot.",
-        reply_markup=reply_markup,
+    keyboard = [
+        [InlineKeyboardButton("START BOT", callback_data='start_bot'),
+         InlineKeyboardButton("STOP BOT", callback_data='stop_bot')],
+        [InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
+         InlineKeyboardButton("REFRESH", callback_data='status_check')]
+    ]
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"**SENTINEL COMMAND CENTER**\n\n"
+             f"**SYSTEM STATUS**: {status}\n"
+             f"**TIME**: {now_ist().strftime('%H:%M:%S')}\n"
+             f"----------------------------\n"
+             f"Use the persistent keyboard below or these buttons.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
 
@@ -123,35 +150,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == 'start_bot':
         keyboard = [[InlineKeyboardButton(" BACK TO MENU", callback_data='status_check')]]
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
         if is_bot_running():
-            await query.edit_message_text(text="BOT IS ALREADY RUNNING.", reply_markup=InlineKeyboardMarkup(keyboard))
+            await context.bot.send_message(chat_id=query.message.chat_id, text="BOT IS ALREADY RUNNING.", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
-            await query.edit_message_text(text="INITIATING BOOT SEQUENCE...")
+            msg = await context.bot.send_message(chat_id=query.message.chat_id, text="INITIATING BOOT SEQUENCE...")
             # Start main.py as a background process
             subprocess.Popen([sys.executable, BOT_SCRIPT], 
                              creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
             await asyncio.sleep(3) # Wait slightly longer for process to register
-            await query.edit_message_text(text="BOT STARTED SUCCESSFULLY.", reply_markup=InlineKeyboardMarkup(keyboard))
+            await msg.edit_text(text="BOT STARTED SUCCESSFULLY.", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == 'stop_bot':
         keyboard = [[InlineKeyboardButton(" BACK TO MENU", callback_data='status_check')]]
+        try:
+            await query.message.delete()
+        except:
+            pass
+            
         if not is_bot_running():
-            await query.edit_message_text(text="BOT IS NOT RUNNING.", reply_markup=InlineKeyboardMarkup(keyboard))
+            await context.bot.send_message(chat_id=query.message.chat_id, text="BOT IS NOT RUNNING.", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
             proc = get_bot_process()
             if proc:
                 proc.terminate()
-                await query.edit_message_text(text="SHUTTING DOWN...")
+                msg = await context.bot.send_message(chat_id=query.message.chat_id, text="SHUTTING DOWN...")
                 await asyncio.sleep(1)
-                await query.edit_message_text(text="BOT STOPPED.", reply_markup=InlineKeyboardMarkup(keyboard))
+                await msg.edit_text(text="BOT STOPPED.", reply_markup=InlineKeyboardMarkup(keyboard))
             else:
-                await query.edit_message_text(text="FAILED TO STOP BOT.", reply_markup=InlineKeyboardMarkup(keyboard))
+                await context.bot.send_message(chat_id=query.message.chat_id, text="FAILED TO STOP BOT.", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == 'pnl_check':
         active, closed, count = get_daily_pnl()
         total = active + closed
         
-        msg = (
+        msg_text = (
             f"**FINANCIAL DEBRIEF**\n\n"
             f"Active Pos: {count}\n"
             f"Closed P&L: Rs {closed:,.2f}\n"
@@ -159,9 +196,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"--------------------------------\n"
             f"**TOTAL P&L: Rs {total:,.2f}**\n"
         )
-        # Add back buttons
         keyboard = [[InlineKeyboardButton("BACK", callback_data='status_check')]]
-        await query.edit_message_text(text=msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        try:
+            await query.message.delete()
+        except:
+            pass
+        await context.bot.send_message(chat_id=query.message.chat_id, text=msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
     elif query.data == 'status_check':
         status = "RUNNING" if is_bot_running() else "STOPPED"
@@ -171,10 +211,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
              InlineKeyboardButton("REFRESH", callback_data='status_check')]
         ]
-        await query.edit_message_text(
-            f"**SENTINEL COMMAND CENTER**\n\n"
-            f"**SYSTEM STATUS**: {status}\n"
-            f"**TIME**: {now_ist().strftime('%H:%M:%S')}\n",
+        try:
+            await query.message.delete()
+        except:
+            pass
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"**SENTINEL COMMAND CENTER**\n\n"
+                 f"**SYSTEM STATUS**: {status}\n"
+                 f"**TIME**: {now_ist().strftime('%H:%M:%S')}\n",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -226,10 +271,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif msg_text == "REFRESH":
         status = "RUNNING" if is_bot_running() else "STOPPED"
-        await update.message.reply_text(
-            f"**SENTINEL COMMAND CENTER**\n\n"
-            f"**SYSTEM STATUS**: {status}\n"
-            f"**TIME**: {now_ist().strftime('%H:%M:%S')}",
+        keyboard = [
+            [InlineKeyboardButton("START BOT", callback_data='start_bot'),
+             InlineKeyboardButton("STOP BOT", callback_data='stop_bot')],
+            [InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
+             InlineKeyboardButton("REFRESH", callback_data='status_check')]
+        ]
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"**SENTINEL COMMAND CENTER**\n\n"
+                 f"**SYSTEM STATUS**: {status}\n"
+                 f"**TIME**: {now_ist().strftime('%H:%M:%S')}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
 
@@ -268,6 +321,8 @@ async def check_otp_requests(bot):
 def main():
     print("Sentinel Mobile Control Starting...")
     print(f"Admin ID: {ADMIN_ID}")
+    
+    check_single_instance()
     
     app = ApplicationBuilder().token(BOT_TOKEN).job_queue(None).build()
     

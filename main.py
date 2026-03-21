@@ -105,10 +105,32 @@ def get_market_data_with_indicators(
             TechnicalIndicators.calculate_adx(daily_df['high'], daily_df['low'], daily_df['close'])
         
         # Fetch intraday 15min data (used for RSI, MACD, ADX)
-        intraday_df = api.get_hybrid_history(symbol, exchange, instrument_token, "15minute", days=10)
+        intraday_df, is_calibrated = api.get_hybrid_history(symbol, exchange, instrument_token, "15minute", days=10)
         if intraday_df is None or len(intraday_df) < 50:
             logger.error(f"Insufficient intraday data for {symbol}")
-            return None, None, None, None
+            return None, None, None, None, False
+            
+        # DYNAMIC CALIBRATION: Synchronize History Baseline with Live Price
+        # This prevents "fake" momentum spikes caused by price gaps between history and live quotes.
+        calibrated_offset = 0.0
+        yf_symbols = {"SENSEX": "^BSESN", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
+        
+        if current_spot > 0 and symbol in yf_symbols:
+            try:
+                # Get the most recent 1m bar globally to find the true current market baseline
+                m1_df = api.get_historical_data(symbol, exchange, instrument_token, "1minute", days=1)
+                if m1_df is not None and not m1_df.empty:
+                    last_m1_price = m1_df.iloc[-1]['close']
+                    calibrated_offset = current_spot - last_m1_price
+                    
+                    if abs(calibrated_offset) > 1.0: # Detect significant drifting
+                        logger.info(f"Dynamic Calibration ({symbol}): Applying live offset of {calibrated_offset:+.2f} to history.")
+                        intraday_df['open'] += calibrated_offset
+                        intraday_df['high'] += calibrated_offset
+                        intraday_df['low'] += calibrated_offset
+                        intraday_df['close'] += calibrated_offset
+            except Exception as e:
+                logger.warning(f"Dynamic Calibration failed for {symbol}: {e}")
         
         # CREATE LIVE FORMING CANDLE for real-time indicators
         # This makes RSI/ADX/MACD update every second!
@@ -143,8 +165,21 @@ def get_market_data_with_indicators(
                 
                 # Append live candle to historical data
                 intraday_df_live = pd.concat([intraday_df, live_candle])
+                
+            # HARDCODED STABILITY CHECK: Final Gap Verification
+            # Even after calibration, ensure the 'forming' candle doesn't have a massive leap 
+            # from the 'last known' historical close (which would skew the indicators like RSI).
+            last_hist_close = intraday_df.iloc[-1]['close']
+            gap_pct = abs(current_spot - last_hist_close) / last_hist_close * 100
+            
+            is_stable = is_calibrated
+            if gap_pct > config.data_stability_threshold_pct:
+                logger.critical(f"⚠️ [bold white on red]DATA INSTABILITY[/] for {symbol}: Gap {gap_pct:.4f}% exceeds {config.data_stability_threshold_pct}% threshold!")
+                is_stable = False
+                
         else:
             intraday_df_live = intraday_df
+            is_stable = is_calibrated
             if current_spot == 0:
                 current_spot = intraday_df.iloc[-1]['close']
         
@@ -166,11 +201,10 @@ def get_market_data_with_indicators(
         if current_vix <= 0:
             current_vix = 15.0
         
-        # Return the live dataframe with real-time indicators
-        return daily_df, intraday_df_live, current_spot, current_vix
+        return daily_df, intraday_df_live, current_spot, current_vix, is_stable
     except Exception as e:
         logger.error(f"Error fetching market data: {e}")
-        return None, None, None, None
+        return None, None, None, None, False
 
 
 def exit_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: OrderManager, symbols_config: dict):
@@ -364,14 +398,17 @@ def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Ord
                 
                 logger.info(f"\nProcessing {underlying}...")
                 
-                # Get market data with indicators
-                daily_df, intraday_df, current_spot, current_vix = get_market_data_with_indicators(
+                # Get market data with indicators (Unpack is_stable flag)
+                daily_df, intraday_df, current_spot, current_vix, is_stable = get_market_data_with_indicators(
                     api, symbol, exchange, instrument_token
                 )
                 
                 if daily_df is None or intraday_df is None:
                     logger.warning(f"Skipping {underlying} due to data issues")
                     continue
+                
+                if not is_stable:
+                    logger.warning(f"🛡️ [DATA STABILITY BLOCK] Skipping entry analysis for {underlying} due to unstable data.")
                 
                 current_row_idx = len(intraday_df) - 1
                 logger.info(f"  Spot: Rs {current_spot:,.2f} | VIX: {current_vix:.2f}")
@@ -481,12 +518,12 @@ def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Ord
                     trade_type = None
                     
                     # Check CE entry
-                    if bot.check_entry_conditions_ce(underlying, daily_df, intraday_df, current_row_idx, current_vix):
+                    if bot.check_entry_conditions_ce(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable):
                         logger.info(f"Entry signal detected for {underlying} CE")
                         trade_type = TradeType.CE
                     
                     # Check PE entry
-                    elif bot.check_entry_conditions_pe(underlying, daily_df, intraday_df, current_row_idx, current_vix):
+                    elif bot.check_entry_conditions_pe(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable):
                         logger.info(f"Entry signal detected for {underlying} PE")
                         trade_type = TradeType.PE
                     

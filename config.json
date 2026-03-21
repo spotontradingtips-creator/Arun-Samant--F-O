@@ -20,11 +20,6 @@
             "token": "26009",
             "key": "BANKNIFTY"
         },
-        "NIFTY FIN SERVICE": {
-            "exchange": "NSE",
-            "token": "26037",
-            "key": "FINNIFTY"
-        },
         "SENSEX": {
             "exchange": "BSE",
             "token": "51",
@@ -69,8 +64,7 @@
     },
     "profit_targets": {
         "comment": "Profit target based on AMOUNT in Rs (editable)",
-        "profit_target_amount": 350.0,
-        "daily_profit_limit": 999999.0
+        "profit_target_amount": 350.0
     },
     "lot_sizes": {
         "NIFTY50": {
@@ -105,6 +99,7 @@
         "macd_slow": 26,
         "macd_signal": 9,
         "rsi_period": 14,
-        "adx_period": 14
+        "adx_period": 14,
+        "data_stability_threshold_pct": 0.10
     }
 }

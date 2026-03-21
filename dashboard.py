@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 F&O Trading Bot - SENTINEL HUB v2.0
 Premium Futuristic Command Center
@@ -14,6 +14,7 @@ import time
 import glob
 import subprocess
 import psutil
+from dotenv import load_dotenv
 from src.utils import setup_logging
 
 # Initialize Logger (Isolated)
@@ -144,6 +145,14 @@ def check_connection():
     has_token = False
     is_valid = False
     
+    # Force reload environment
+    load_dotenv(override=True)
+    api_key = os.getenv('API_KEY')
+    logger.info(f"DEBUG: Dashboard checking connection. API_KEY suffix: {api_key[-10:] if api_key else 'None'}")
+    
+    if not api_key:
+        return "OFFLINE (MISSING API_KEY)", False
+
     # 1. Check for Token Existence
     if os.path.exists('credentials.json'):
         try:
@@ -157,22 +166,17 @@ def check_connection():
                         from src.market_data import MStockAPI
                         api = MStockAPI()
                         # Use a lightweight call to check validity
-                        # If get_quote fails with 401, token is invalid
-                        # We use NIFTY 50 as benchmark
+                        # Smart API handles prefix automatically
                         quote = api.get_quote('NIFTY 50') 
                         if quote: 
                             is_valid = True
                         else:
-                            # If quote is None, it might be 401 or just error
-                            # But MStockAPI logs 401. 
-                            # We can assume if quote is None, connection is suspect.
-                            # However, to be precise, we need to know if it was 401.
-                            # MStockAPI catches exceptions. 
-                            # Let's rely on the fact that if we can't get data, we are effectively offline.
                             is_valid = False
-                    except:
+                    except Exception as e:
+                        logger.error(f"Conn check error: {e}")
                         is_valid = False
-        except:
+        except Exception as e:
+            logger.error(f"Creds read error: {e}")
             pass
             
     if has_token and is_valid:

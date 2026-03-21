@@ -108,10 +108,10 @@ Checked **every 1 second** in **priority order**:
 
 | Target | Value | Calculation |
 |--------|-------|-------------|
-| **Profit Target** | **Rs 250** | Net P&L per position |
+| **Profit Target** | **Rs 350** | Net P&L per position |
 | **Safety Net** | **-50%** | Hard exit on premium loss |
 
-**Current Setting**: `profit_target_amount = 250.0` (Hardcoded for safety)
+**Current Setting**: `profit_target_amount = 350.0` (Hardcoded for safety)
 
 ### Priority 3: Trend Reversal (Safety Exit)
 **Applies regardless of current profit. MUST BE CONFIRMED ON CANDLE CLOSE.**
@@ -246,11 +246,11 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
  
  ### Exit Decision (Priority Order)
  1. **Stop Loss**  Based on spot movement (VIX-adjusted)
- 2. **Profit Target**  Based on hardcoded amount (Rs 250.0)
+ 2. **Profit Target**  Based on hardcoded amount (Rs 350.0)
  3. **Trend Reversal**  MACD or DI crossover against position
 
 ### Profit/Loss Basis
-- **Profit Target**: Calculated as **FIXED AMOUNT (Rs 250.0)**
+- **Profit Target**: Calculated as **FIXED AMOUNT (Rs 350.0)**
 - **Stop Loss**: Triggered by **UNDERLYING SPOT MOVEMENT** (0.7%-1.5% depending on index and VIX)
 - **Final P&L**: Difference in premium  lot size
 
@@ -277,7 +277,7 @@ All these can be changed in [`config.json`](file:///c:/Antigravity/Arun%20Samant
 From your [`config.json`](file:///c:/Antigravity/Arun%20Samant%20-%20F&O/config.json):
 - **Live Trading**:  ENABLED
 - **Strike Depth**: 0 (ATM)
-- **Profit Target**: Rs 250.0 (Hardcoded)
+- **Profit Target**: Rs 350.0 (Hardcoded)
 - **Daily Profit Cap**: **DISABLED** (No automatic stop)
 - **NIFTY SL**: 0.7% (base)
 - **BANKNIFTY SL**: 1.2% (base)

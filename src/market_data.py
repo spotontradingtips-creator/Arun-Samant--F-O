@@ -24,7 +24,7 @@ class MStockAPI:
     
     def __init__(self):
         """Initialize mStock API with credentials from .env"""
-        load_dotenv()
+        load_dotenv(override=True)
         
         self.api_key = os.getenv('API_KEY')
         self.api_secret = os.getenv('API_SECRET')
@@ -164,7 +164,7 @@ class MStockAPI:
         try:
             # Check with a lightweight endpoint (Quote is more reliable than portfolio/holdings)
             url = f"{self.base_url}/instruments/quote/ohlc"
-            params = {"i": "NSE:NIFTY 50"}
+            params = {"i": "NSE:NIFTY 50"} # Hardcoded for safety here
             resp = requests.get(url, headers=self.get_headers(), params=params, timeout=(10, 20))
             
             if resp.status_code == 401:
@@ -198,21 +198,21 @@ class MStockAPI:
         
         Parameters:
         -----------
-        symbol : str
-            Trading symbol (e.g., 'NIFTY 50', 'NIFTY BANK')
-        exchange : str
-            Exchange (NSE/BSE)
-            
-        Returns:
-        --------
-        Optional[Dict]
-            Quote data with last_price, ohlc, etc.
+        Fetch market quote data for a symbol.
+        Handles both plain symbols (adds prefix) and already-prefixed symbols.
         """
         try:
             url = f"{self.base_url}/instruments/quote/ohlc"
-            params = {"i": f"{exchange}:{symbol.upper()}"}
             
-            response = requests.get(url, headers=self.get_headers(), params=params, timeout=(30, 60))
+            # Smart symbol handling: if already prefixed (contains ':'), use as is
+            if ":" in symbol:
+                full_symbol = symbol.upper()
+            else:
+                full_symbol = f"{exchange}:{symbol.upper()}"
+                
+            params = {"i": full_symbol}
+            
+            response = requests.get(url, headers=self.get_headers(), params=params, timeout=(10, 20))
             if response.status_code != 200:
                 logger.error(f"Quote fetch error for {symbol}: {response.status_code}")
                 return None
@@ -234,9 +234,10 @@ class MStockAPI:
         instrument_token: str,
         timeframe: str = "15minute",
         days: int = 10
-    ) -> Optional[pd.DataFrame]:
+    ) -> Tuple[Optional[pd.DataFrame], bool]:
         """
         Fetch history from mStock and fill missing today's bars from yfinance.
+        Returns (dataframe, is_calibrated)
         """
         # 1. Fetch from mStock (Standard)
         mstock_df = self.get_historical_data(symbol, exchange, instrument_token, timeframe, days)
@@ -254,6 +255,7 @@ class MStockAPI:
         }
         
         if symbol in yf_symbols and timeframe == "15minute":
+            is_calibrated = False # Default to false for major indices until verified
             try:
                 import yfinance as yf
                 yf_ticker = yf_symbols[symbol]
@@ -279,22 +281,45 @@ class MStockAPI:
                     yf_df = yf_df.between_time("09:15", "15:30")
                     
                     if mstock_df is None or mstock_df.empty:
-                        return yf_df
+                        return yf_df, False # Cannot calibrate against empty mstock
+                    
+                    # NORMALIZATION LOGIC: Calculate and apply price offset
+                    # Identify common timestamps to find the baseline difference
+                    common_times = mstock_df.index.intersection(yf_df.index)
+                    if not common_times.empty:
+                        is_calibrated = True # We found common ground
+                        # Use the median offset from last few common bars for stability
+                        # ms_price - yf_price = offset
+                        offsets = mstock_df.loc[common_times[-5:], 'close'] - yf_df.loc[common_times[-5:], 'close']
+                        median_offset = float(offsets.median())
+                        
+                        if abs(median_offset) > 0.01: # Avoid jitter for micro-offsets
+                            logger.info(f"Normalizing {symbol} data: Applying price offset of {median_offset:+.2f} to yfinance bars.")
+                            yf_df['open'] += median_offset
+                            yf_df['high'] += median_offset
+                            yf_df['low'] += median_offset
+                            yf_df['close'] += median_offset
+                    else:
+                        logger.warning(f"CALIBRATION FAILED for {symbol}: No common timestamps between mStock and yfinance.")
+                        is_calibrated = False
                     
                     # Stitching logic:
-                    # Keep mstock_df as base, append yf_df bars that are NOT in mstock_df
+                    # Keep mstock_df as base, append normalized yf_df bars that are NOT in mstock_df
                     last_mstock_time = mstock_df.index[-1]
                     missing_bars = yf_df[yf_df.index > last_mstock_time]
                     
                     if not missing_bars.empty:
                         logger.info(f"Hybrid Data: Added {len(missing_bars)} missing bars from yfinance for {symbol}")
                         combined_df = pd.concat([mstock_df, missing_bars])
-                        return combined_df
+                        return combined_df, is_calibrated
+                    
+                return mstock_df, is_calibrated
                         
             except Exception as e:
                 logger.warning(f"Failed to fetch hybrid data from yfinance for {symbol}: {e}")
+                return mstock_df, False
                 
-        return mstock_df
+        return mstock_df, True # Non-hybrid symbols are "calibrated" by default
 
     def get_historical_data(
         self,
@@ -345,17 +370,54 @@ class MStockAPI:
             )
             
             response = requests.get(url, headers=self.get_headers(), timeout=(30, 60))
-            if response.status_code != 200:
-                logger.error(f"Historical data error: {response.status_code}")
-                return None
             
-            data = response.json()
-            if data.get("status") != "success":
-                logger.error(f"Historical data fetch failed: {data.get('message')}")
+            data = {}
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except Exception:
+                    pass
+
+            # Fallback for 1-minute index data (mStock token 51 often 400s for 1m)
+            if response.status_code != 200 or data.get("status") != "success":
+                yf_symbols = {"SENSEX": "^BSESN", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
+                if timeframe == "1minute" and symbol in yf_symbols:
+                    try:
+                        import yfinance as yf
+                        yf_ticker = yf_symbols[symbol]
+                        yf_df = yf.download(yf_ticker, period="1d", interval="1m", progress=False)
+                        if yf_df is not None and not yf_df.empty:
+                            yf_df.columns = [col[0] if isinstance(col, tuple) else col for col in yf_df.columns]
+                            yf_df = yf_df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'})
+                            if yf_df.index.tz is None:
+                                yf_df.index = yf_df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+                            else:
+                                yf_df.index = yf_df.index.tz_convert("Asia/Kolkata")
+                            return yf_df.between_time("09:15", "15:30")[["open", "high", "low", "close"]]
+                    except Exception: pass
+                
+                logger.error(f"Historical data fetch failed: {data.get('message', response.status_code)}")
                 return None
             
             candles = data.get("data", {}).get("candles", [])
             if not candles:
+                # Same yf fallback for empty candles
+                yf_symbols = {"SENSEX": "^BSESN", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
+                if timeframe == "1minute" and symbol in yf_symbols:
+                    try:
+                        import yfinance as yf
+                        yf_ticker = yf_symbols[symbol]
+                        yf_df = yf.download(yf_ticker, period="1d", interval="1m", progress=False)
+                        if yf_df is not None and not yf_df.empty:
+                            yf_df.columns = [col[0] if isinstance(col, tuple) else col for col in yf_df.columns]
+                            yf_df = yf_df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'})
+                            if yf_df.index.tz is None:
+                                yf_df.index = yf_df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+                            else:
+                                yf_df.index = yf_df.index.tz_convert("Asia/Kolkata")
+                            return yf_df.between_time("09:15", "15:30")[["open", "high", "low", "close"]]
+                    except Exception: pass
+                    
                 logger.warning(f"No candles returned for {symbol}")
                 return None
             

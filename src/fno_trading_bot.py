@@ -93,37 +93,25 @@ class FnOTradingBot:
         daily_data: pd.DataFrame,
         intraday_data: pd.DataFrame,
         current_row_idx: int,
-        vix: float
+        vix: float,
+        data_is_stable: bool = True
     ) -> bool:
         """
         Check all 8 MANDATORY conditions for CALL (CE) entry
         
-        Conditions:
+        Condition 0: Data Stability Guard (HARDCODED SAFETY)
         1. No duplicate positions
-        2. Trading hours (9:25 AM - 2:30 PM)
-        ALL of the following conditions must be met for CE entry:
-        1. No existing position in underlying
-        2. No duplicate signal on same candle
-        3. Time between 9:15 AM - 3:15 PM
-        4. VIX >= 10.0
-        5. MACD > Signal (bullish)
-        6. RSI between 30-65
-        7. Daily ADX > 25
-        
-        Returns:
-        --------
-        bool
-            True if all conditions met
+        ...
+        True if all conditions met
         """
+        # Condition 0: Data Stability Guard (HARDCODED SAFETY)
+        if not data_is_stable:
+             logger.critical(f"🛡️ {underlying} [CE]: [bold white on red]ENTRY BLOCKED[/] - Data Stability Guard Triggered.")
+             return False
         # DEFENSIVE CODE: Ensure closed_trades exists
         if not hasattr(self, 'closed_trades'):
             self.closed_trades = []
 
-        # Condition 0: Daily Profit Cap (HARDCODED: 1200/-)
-        with self.lock:
-            if self.daily_pnl >= self.config.daily_profit_limit:
-                logger.info(f"{underlying} [CE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= {self.config.daily_profit_limit}) - Stopping for today")
-                return False
 
         # Condition 1: No duplicate positions
         with self.lock:
@@ -248,35 +236,20 @@ class FnOTradingBot:
         daily_data: pd.DataFrame,
         intraday_data: pd.DataFrame,
         current_row_idx: int,
-        vix: float
+        vix: float,
+        data_is_stable: bool = True
     ) -> bool:
         """
         Check all 8 MANDATORY conditions for PUT (PE) entry
-        
-        Conditions:
-        ALL of the following conditions must be met for PE entry:
-        1. No existing position in underlying
-        2. No duplicate signal on same candle
-        3. Time between 9:15 AM - 3:15 PM
-        4. VIX >= 10.0
-        5. MACD < Signal (bearish)
-        6. RSI between 30-65
-        7. Daily ADX > 25
-        
-        Returns:
-        --------
-        bool
-            True if all conditions met
         """
+        # Condition 0: Data Stability Guard (HARDCODED SAFETY)
+        if not data_is_stable:
+             logger.critical(f"🛡️ {underlying} [PE]: [bold white on red]ENTRY BLOCKED[/] - Data Stability Guard Triggered.")
+             return False
         # DEFENSIVE CODE: Ensure closed_trades exists
         if not hasattr(self, 'closed_trades'):
             self.closed_trades = []
 
-        # Condition 0: Daily Profit Cap (HARDCODED: 1200/-)
-        with self.lock:
-            if self.daily_pnl >= self.config.daily_profit_limit:
-                logger.info(f"{underlying} [PE]: Daily profit cap reached (Rs {self.daily_pnl:.2f} >= {self.config.daily_profit_limit}) - Stopping for today")
-                return False
 
         # Condition 1: No duplicate positions
         with self.lock:
