@@ -232,9 +232,9 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
  
  | Total Daily Profit | Locked-In Floor | Logic |
  | :--- | :--- | :--- |
- | ₹350 - ₹699 | **₹250** | Locks in ₹250 if profit reached ₹350 |
- | ₹700 - ₹1049 | **₹500** | Locks in ₹500 if profit reached ₹700 |
- | ₹1050 - ₹1399 | **₹750** | Locks in ₹750 if profit reached ₹1050 |
+ | ₹350 - ₹699 | **₹250** | Locks in ₹250. |
+ | ₹700 - ₹1,049 | **₹500** | Locks in ₹500. |
+ | ₹1,050 - ₹1,399 | **₹750** | Locks in ₹750. |
  | ₹1400 - ₹1749 | **₹1000** | Locks in ₹1000 if profit reached ₹1400 |
  
  **How it works**:

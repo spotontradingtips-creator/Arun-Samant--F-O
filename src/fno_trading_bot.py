@@ -597,6 +597,14 @@ Returns:
             # Persist state
             StateManager.save_positions(self.positions)
             StateManager.save_history(self.closed_trades)
+            
+            # [NEW] RESET & RE-CLIMB LOGIC
+            # If we exited due to Win-Lock, we effectively "re-base" our peak
+            # to the current lock-in level. This prevents the bot from 
+            # being "locked out" of the next trade and allows a new ladder to build.
+            if exit_reason == ExitReason.DAILY_WIN_LOCK:
+                self.daily_max_pnl = self.daily_pnl
+                logger.info(f"WIN-LOCK RESET: Next trade starts fresh from Rs {self.daily_pnl:.2f}")
         
         pnl_style = "bold green" if position.pnl >= 0 else "bold red"
         exit_symbol = "[PROFIT]" if position.pnl >= 0 else "[LOSS]"
