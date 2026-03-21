@@ -174,7 +174,7 @@ def get_market_data_with_indicators(
             
             is_stable = is_calibrated
             if gap_pct > config.data_stability_threshold_pct:
-                logger.critical(f"⚠️ [bold white on red]DATA INSTABILITY[/] for {symbol}: Gap {gap_pct:.4f}% exceeds {config.data_stability_threshold_pct}% threshold!")
+                logger.critical(f"DATA INSTABILITY for {symbol}: Gap {gap_pct:.4f}% exceeds {config.data_stability_threshold_pct}% threshold!")
                 is_stable = False
                 
         else:
@@ -408,7 +408,7 @@ def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Ord
                     continue
                 
                 if not is_stable:
-                    logger.warning(f"🛡️ [DATA STABILITY BLOCK] Skipping entry analysis for {underlying} due to unstable data.")
+                    logger.warning(f"[DATA STABILITY BLOCK] Skipping entry analysis for {underlying} due to unstable data.")
                 
                 current_row_idx = len(intraday_df) - 1
                 logger.info(f"  Spot: Rs {current_spot:,.2f} | VIX: {current_vix:.2f}")

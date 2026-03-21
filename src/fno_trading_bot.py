@@ -19,6 +19,7 @@ from src.symbol_master import SymbolMaster
 from src.persistence import StateManager
 from src.trading_models import TradeType, ExitReason, Position
 from src.notifications import notify_trade_entry, notify_trade_exit
+from src.option_selector import OptionSelector
 
 from rich.table import Table
 from rich.panel import Panel
@@ -107,7 +108,7 @@ class FnOTradingBot:
         """
         # Condition 0: Data Stability Guard (HARDCODED SAFETY)
         if not data_is_stable:
-             logger.critical(f"🛡️ {underlying} [CE]: [bold white on red]ENTRY BLOCKED[/] - Data Stability Guard Triggered.")
+             logger.critical(f"{underlying} [CE]: ENTRY BLOCKED - Data Stability Guard Triggered.")
              return False
         # DEFENSIVE CODE: Ensure closed_trades exists
         if not hasattr(self, 'closed_trades'):
@@ -123,11 +124,6 @@ class FnOTradingBot:
             # Condition 1b: STRICT ANTI-DUPLICATION (Symbol Specific)
             # Prevent re-entering the EXACT SAME option symbol for the day
             # But allow trading PE even if CE was traded (and vice versa)
-            
-            # Get current ATM strike to check against history
-            # We need to know what strike would be selected NOW
-            from src.option_selector import OptionSelector
-            current_spot = intraday_data['close'].iloc[current_row_idx]
             
             # Predicted strike for the potential new trade (Accounting for ITM/OTM adjustments)
             target_strike, _ = OptionSelector.select_option(underlying, current_spot, "CE", depth=self.config.strike_depth)
@@ -245,7 +241,7 @@ class FnOTradingBot:
         """
         # Condition 0: Data Stability Guard (HARDCODED SAFETY)
         if not data_is_stable:
-             logger.critical(f"🛡️ {underlying} [PE]: [bold white on red]ENTRY BLOCKED[/] - Data Stability Guard Triggered.")
+             logger.critical(f"{underlying} [PE]: ENTRY BLOCKED - Data Stability Guard Triggered.")
              return False
         # DEFENSIVE CODE: Ensure closed_trades exists
         if not hasattr(self, 'closed_trades'):
@@ -258,13 +254,6 @@ class FnOTradingBot:
                 logger.info(f"{underlying} [PE]: Already in position")
                 return False
                 
-            # Condition 1b: STRICT ANTI-DUPLICATION (Symbol Specific - PE)
-            from src.option_selector import OptionSelector
-            current_spot = intraday_data['close'].iloc[current_row_idx]
-            
-            # Check if we have already traded this specific strike & type today
-            today_date = now_ist().date()
-            
             # Predicted strike for the potential new trade (Accounting for ITM/OTM adjustments)
             target_strike, _ = OptionSelector.select_option(underlying, current_spot, "PE", depth=self.config.strike_depth)
             
@@ -513,10 +502,9 @@ Returns:
                 if total_daily_pnl > self.daily_max_pnl:
                     self.daily_max_pnl = total_daily_pnl
                     # Log when we hit a new step
-                    if int(self.daily_max_pnl // self.config.win_lock_step) > int((self.daily_max_pnl - current_trade_pnl) // self.config.win_lock_step):
                          num_steps = int(self.daily_max_pnl // self.config.win_lock_step)
                          new_floor = num_steps * self.config.win_lock_floor_step
-                         logger.info(f"🏆 [bold green]NEW DAILY PROFIT STEP:[/bold green] Peak: Rs {self.daily_max_pnl:.2f} | Floor Locked at: [bold cyan]Rs {new_floor:.2f}[/bold cyan]")
+                         logger.info(f"NEW DAILY PROFIT STEP: Peak: Rs {self.daily_max_pnl:.2f} | Floor Locked at: [bold cyan]Rs {new_floor:.2f}[/bold cyan]")
             
             # Calculate current floor
             num_steps = int(self.daily_max_pnl // self.config.win_lock_step)
@@ -524,7 +512,7 @@ Returns:
             
             # Check if we dropped to the floor
             if current_floor > 0 and total_daily_pnl <= current_floor:
-                logger.warning(f"🛡️ [bold yellow]DAILY WIN-LOCK TRIGGERED:[/bold yellow] Total P&L (Rs {total_daily_pnl:.2f}) dropped to Floor (Rs {current_floor:.2f})")
+                logger.warning(f"DAILY WIN-LOCK TRIGGERED: Total P&L (Rs {total_daily_pnl:.2f}) dropped to Floor (Rs {current_floor:.2f})")
                 return ExitReason.DAILY_WIN_LOCK
         
         # Priority 3: TREND REVERSAL (Immediate Exit)
@@ -533,7 +521,6 @@ Returns:
         # CRITICAL UPDATE: Must be on CANDLE CLOSE (Previous Index)
         # We check index `current_row_idx - 1` to ensure the reversal is CONFIRMED.
         
-        reversal_detected = False
         check_idx = current_row_idx - 1  # Check PREVIOUS (Closed) Candle
         
         if check_idx > 0: # Ensure valid index
