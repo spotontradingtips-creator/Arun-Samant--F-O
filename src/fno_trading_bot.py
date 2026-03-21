@@ -342,10 +342,10 @@ class FnOTradingBot:
             return False
         logger.info(f"{underlying} [PE]: MACD Histogram Dark Red (Momentum Increasing).")
         
-        # Condition 7: 15m RSI in range (45-65)
+        # Condition 7: 15m RSI in range (PE-specific: 35-75, allows overbought entries)
         rsi = current_row['RSI']
-        if not (self.config.rsi_min <= rsi <= self.config.rsi_max):
-            logger.info(f"{underlying} [PE]: RSI Check Failed (Value: {rsi:.2f} | Range: {self.config.rsi_min}-{self.config.rsi_max})")
+        if not (self.config.rsi_pe_min <= rsi <= self.config.rsi_pe_max):
+            logger.info(f"{underlying} [PE]: RSI Check Failed (Value: {rsi:.2f} | Range: {self.config.rsi_pe_min}-{self.config.rsi_pe_max})")
             return False
         # Condition 9: Daily ADX > 25
         daily_row = daily_data.iloc[-1]

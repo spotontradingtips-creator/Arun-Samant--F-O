@@ -17,7 +17,8 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 | 2 | **VIX Minimum** |  10.0 | Skip trading if VIX too low |
 | 3 | **No Duplicate Position** | Max 1 position per index | Cannot have multiple positions in same underlying |
 | 4 | **No Duplicate Signal** | Fresh crossover required | Won't re-enter on same candle |
-| 5 | **15m RSI Range** | 30.0 to 65.0 | Momentum must be in range |
+| 5 | **15m RSI Range (CE)** | 30.0 to 65.0 | Momentum must be in range (Call entries) |
+| 5b | **15m RSI Range (PE)** | 35.0 to 75.0 | Wider upper bound for Put entries (allows overbought) |
 | 6 | **Daily ADX** | > 25.0 | Higher timeframe trend strength |
 | 7 | **MACD Histogram** | **Dark Color** | CE: Dark Green (Inc) / PE: Dark Red (Dec) |
 | 8 | **15m ADX** | > 25.0 | **CURRENTLY DISABLED** (Optional) |
@@ -192,7 +193,8 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
 | Parameter | Value |
 |-----------|-------|
 | Period | 14 |
-| Entry Range | 30.0 - 65.0 |
+| Entry Range (CE) | 30.0 - 65.0 |
+| Entry Range (PE) | 35.0 - 75.0 |
 
 ### ADX Parameters
 | Parameter | Value |

@@ -93,6 +93,8 @@
         "vix_min_threshold": 10.0,
         "rsi_min": 30.0,
         "rsi_max": 65.0,
+        "rsi_pe_min": 35.0,
+        "rsi_pe_max": 75.0,
         "adx_min": 25.0,
         "adx_daily_min": 25.0,
         "macd_fast": 12,

@@ -76,10 +76,14 @@ class TradingConfig:
     rsi_period: int = 14
     adx_period: int = 14
     
-    # RSI Range for Entry
-    # RSI Range for Entry
+    # RSI Range for Entry (CE - Call Options)
     rsi_min: float = 30.0
     rsi_max: float = 65.0
+    
+    # RSI Range for Entry (PE - Put Options)
+    # Wider upper bound allows PE entries when market is overbought (prime reversal territory)
+    rsi_pe_min: float = 35.0
+    rsi_pe_max: float = 75.0
     
     # ADX Threshold
     adx_min: float = 25.0              # Minimum ADX for trend strength (OPTIONAL - can be ignored)
@@ -187,6 +191,8 @@ class TradingConfig:
                 self.vix_min_threshold = ind.get('vix_min_threshold', self.vix_min_threshold)
                 self.rsi_min = ind.get('rsi_min', self.rsi_min)
                 self.rsi_max = ind.get('rsi_max', self.rsi_max)
+                self.rsi_pe_min = ind.get('rsi_pe_min', self.rsi_pe_min)
+                self.rsi_pe_max = ind.get('rsi_pe_max', self.rsi_pe_max)
                 self.adx_min = ind.get('adx_min', self.adx_min)
                 self.adx_daily_min = ind.get('adx_daily_min', self.adx_daily_min)
                 self.macd_fast = ind.get('macd_fast', self.macd_fast)
