@@ -15,6 +15,7 @@ class ExitReason(Enum):
     STOP_LOSS = "Stop Loss Hit"
     MACD_REVERSAL = "MACD Reversal"
     EOD_CLOSE = "EOD Force Close"
+    DAILY_WIN_LOCK = "Daily Win-Lock (TSL)"
     BROKER_SYNC_EXIT = "Broker Sync Reconciliation"
 
 

@@ -65,9 +65,12 @@ class TradingConfig:
     # Safety Net (Max Premium Loss)
     max_premium_loss_percent: float = -50.0 # Force exit if premium drops by this %
     
-    # Data Stability Guard (NEW: Hardcoded Safety)
-    # Maximum allowed divergence between live price and historical data/broker feeds
     data_stability_threshold_pct: float = 0.10 # 0.1% max divergence (e.g. 23 pts for Nifty)
+    
+    # Daily Win-Lock (Trailing SL on total daily P&L)
+    win_lock_enabled: bool = True
+    win_lock_step: float = 350.0
+    win_lock_floor_step: float = 250.0
     
     # Technical Indicator Periods
     macd_fast: int = 12
@@ -194,6 +197,13 @@ class TradingConfig:
                 self.rsi_pe_min = ind.get('rsi_pe_min', self.rsi_pe_min)
                 self.rsi_pe_max = ind.get('rsi_pe_max', self.rsi_pe_max)
                 self.adx_min = ind.get('adx_min', self.adx_min)
+                
+            # Load daily win-lock settings
+            if 'daily_win_lock' in config_data:
+                dwl = config_data['daily_win_lock']
+                self.win_lock_enabled = dwl.get('enabled', self.win_lock_enabled)
+                self.win_lock_step = dwl.get('step_amount', self.win_lock_step)
+                self.win_lock_floor_step = dwl.get('floor_step_amount', self.win_lock_floor_step)
                 self.adx_daily_min = ind.get('adx_daily_min', self.adx_daily_min)
                 self.macd_fast = ind.get('macd_fast', self.macd_fast)
                 self.macd_slow = ind.get('macd_slow', self.macd_slow)

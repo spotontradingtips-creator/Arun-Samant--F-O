@@ -74,6 +74,7 @@ class FnOTradingBot:
                 today_trades = [p for p in loaded_history if p.entry_time.date() == today_date]
                 self.daily_trades = len(today_trades)
                 self.daily_pnl = sum(p.pnl for p in today_trades if p.pnl is not None)
+                self.daily_max_pnl = max(0.0, self.daily_pnl) # Peak profit reached today
                 logger.info(f"Restored {len(self.closed_trades)} total historical trades ({self.daily_trades} from today).")
         except Exception as e:
             logger.error(f"Error loading state: {e}")
@@ -500,6 +501,31 @@ Returns:
         # Priority 2: Profit Target
         if position.check_profit_hit(current_premium, self.config.profit_target_amount):
             return ExitReason.PROFIT_TARGET
+        
+        # Priority 2.5: DAILY WIN-LOCK (Trailing SL on Daily P&L)
+        if self.config.win_lock_enabled:
+            # Calculate total daily P&L including current trade
+            current_trade_pnl = position.calculate_pnl(current_premium)
+            total_daily_pnl = self.daily_pnl + current_trade_pnl
+            
+            # Update daily peak
+            with self.lock:
+                if total_daily_pnl > self.daily_max_pnl:
+                    self.daily_max_pnl = total_daily_pnl
+                    # Log when we hit a new step
+                    if int(self.daily_max_pnl // self.config.win_lock_step) > int((self.daily_max_pnl - current_trade_pnl) // self.config.win_lock_step):
+                         num_steps = int(self.daily_max_pnl // self.config.win_lock_step)
+                         new_floor = num_steps * self.config.win_lock_floor_step
+                         logger.info(f"🏆 [bold green]NEW DAILY PROFIT STEP:[/bold green] Peak: Rs {self.daily_max_pnl:.2f} | Floor Locked at: [bold cyan]Rs {new_floor:.2f}[/bold cyan]")
+            
+            # Calculate current floor
+            num_steps = int(self.daily_max_pnl // self.config.win_lock_step)
+            current_floor = num_steps * self.config.win_lock_floor_step
+            
+            # Check if we dropped to the floor
+            if current_floor > 0 and total_daily_pnl <= current_floor:
+                logger.warning(f"🛡️ [bold yellow]DAILY WIN-LOCK TRIGGERED:[/bold yellow] Total P&L (Rs {total_daily_pnl:.2f}) dropped to Floor (Rs {current_floor:.2f})")
+                return ExitReason.DAILY_WIN_LOCK
         
         # Priority 3: TREND REVERSAL (Immediate Exit)
         # Conditions: MACD Reversal OR DI Crossover Reversal

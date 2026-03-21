@@ -225,8 +225,27 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
 | **Trading Mode** | LIVE (Real orders) |
 
 ---
-
-##  RE-ENTRY LOGIC
+ 
+ ##  DAILY WIN-LOCK (TRAILING SL)
+ 
+ This system protects your accumulated daily profits by setting a rising "floor."
+ 
+ | Total Daily Profit | Locked-In Floor | Logic |
+ | :--- | :--- | :--- |
+ | ₹350 - ₹699 | **₹250** | Locks in ₹250 if profit reached ₹350 |
+ | ₹700 - ₹1049 | **₹500** | Locks in ₹500 if profit reached ₹700 |
+ | ₹1050 - ₹1399 | **₹750** | Locks in ₹750 if profit reached ₹1050 |
+ | ₹1400 - ₹1749 | **₹1000** | Locks in ₹1000 if profit reached ₹1400 |
+ 
+ **How it works**:
+ 1. The bot tracks your **Peak Daily Profit** (including open trades).
+ 2. For every **₹350** of profit reached, it secures a floor **₹100** below that step.
+ 3. If your total P&L drops to this floor, the bot **immediately exits the current trade**.
+ 4. It does **NOT** stop for the day; it will look for new entries as per regular rules.
+ 
+ ---
+ 
+ ##  RE-ENTRY LOGIC
 
 ### First Trade of Day
 - **Relaxed Entry**: Enters if trend is active (MACD > Signal for CE, MACD < Signal for PE)

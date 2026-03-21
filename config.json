@@ -103,5 +103,11 @@
         "rsi_period": 14,
         "adx_period": 14,
         "data_stability_threshold_pct": 0.10
+    },
+    "daily_win_lock": {
+        "enabled": true,
+        "step_amount": 350.0,
+        "floor_step_amount": 250.0,
+        "comment": "Every 350 profit reached, lock in 250 floor. If profit drops to floor, exit current trade."
     }
 }
