@@ -626,6 +626,37 @@ Returns:
         
         return position
     
+    def sync_daily_pnl(self, api):
+        """
+        Synchronize daily P&L with the broker's actual realized P&L.
+        This ensures Win-Lock calculations account for slippage.
+        """
+        try:
+            positions = api.get_net_positions()
+            if positions is None:
+                return
+                
+            total_realized_pnl = 0.0
+            for pos in positions:
+                # mStock/Mirae typically provides 'pnl' or 'realized_pnl' in net positions
+                # We want the SUM of all realized P&L for today.
+                pnl = float(pos.get('pnl', pos.get('realized_pnl', 0.0)))
+                total_realized_pnl += pnl
+            
+            with self.lock:
+                old_pnl = self.daily_pnl
+                self.daily_pnl = total_realized_pnl
+                
+                # Update daily peak if the verified P&L is higher
+                if self.daily_pnl > self.daily_max_pnl:
+                    self.daily_max_pnl = self.daily_pnl
+                
+                if abs(self.daily_pnl - old_pnl) > 10: # Only log significant shifts
+                    logger.info(f"P&L SYNCED WITH BROKER: Local(Rs {old_pnl:.2f}) -> Broker(Rs {self.daily_pnl:.2f})")
+        
+        except Exception as e:
+            logger.error(f"Error syncing P&L with broker: {e}")
+
     def get_account_summary(self) -> Dict:
         """Get account summary statistics"""
         with self.lock:

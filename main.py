@@ -355,6 +355,13 @@ def exit_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Orde
                             logger.error(f"Cannot exit {underlying}: Missing option_symbol")
 
                     bot.exit_trade(underlying, current_premium, current_spot, exit_reason)
+                    
+                    # [NEW] Real-time Reconciliation: Fetch actual fill price P&L from broker
+                    if config.live_trading:
+                        # Give the broker a moment to process the fill
+                        import time
+                        time.sleep(2)
+                        bot.sync_daily_pnl(api)
                     continue
             
             # Sleep 1 second before next check
@@ -604,8 +611,11 @@ def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Ord
                         # by check_entry_conditions_ce/pe functions
                         pass
             
-            # Print current status (only every 10 iterations to reduce log spam)
+            # Print current status and Sync P&L (only every 10 iterations to reduce log spam)
             if iteration % 10 == 0:
+                if config.live_trading:
+                    bot.sync_daily_pnl(api) # Periodic reconciliation
+
                 summary = bot.get_account_summary()
                 logger.info(f"\nActive Positions: {summary['open_positions']}")
                 logger.info(f"Daily P&L: Rs {summary['daily_pnl']:+,.2f}")
