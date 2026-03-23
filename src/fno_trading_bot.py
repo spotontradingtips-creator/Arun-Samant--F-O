@@ -96,7 +96,8 @@ class FnOTradingBot:
         intraday_data: pd.DataFrame,
         current_row_idx: int,
         vix: float,
-        data_is_stable: bool = True
+        data_is_stable: bool = True,
+        current_spot: float = 0.0
     ) -> bool:
         """
         Check all 8 MANDATORY conditions for CALL (CE) entry
@@ -234,7 +235,8 @@ class FnOTradingBot:
         intraday_data: pd.DataFrame,
         current_row_idx: int,
         vix: float,
-        data_is_stable: bool = True
+        data_is_stable: bool = True,
+        current_spot: float = 0.0
     ) -> bool:
         """
         Check all 8 MANDATORY conditions for PUT (PE) entry
@@ -502,9 +504,9 @@ Returns:
                 if total_daily_pnl > self.daily_max_pnl:
                     self.daily_max_pnl = total_daily_pnl
                     # Log when we hit a new step
-                         num_steps = int(self.daily_max_pnl // self.config.win_lock_step)
-                         new_floor = num_steps * self.config.win_lock_floor_step
-                         logger.info(f"NEW DAILY PROFIT STEP: Peak: Rs {self.daily_max_pnl:.2f} | Floor Locked at: [bold cyan]Rs {new_floor:.2f}[/bold cyan]")
+                    num_steps = int(self.daily_max_pnl // self.config.win_lock_step)
+                    new_floor = num_steps * self.config.win_lock_floor_step
+                    logger.info(f"NEW DAILY PROFIT STEP: Peak: Rs {self.daily_max_pnl:.2f} | Floor Locked at: [bold cyan]Rs {new_floor:.2f}[/bold cyan]")
             
             # Calculate current floor
             num_steps = int(self.daily_max_pnl // self.config.win_lock_step)

@@ -356,10 +356,8 @@ def exit_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Orde
 
                     bot.exit_trade(underlying, current_premium, current_spot, exit_reason)
                     
-                    # [NEW] Real-time Reconciliation: Fetch actual fill price P&L from broker
                     if config.live_trading:
                         # Give the broker a moment to process the fill
-                        import time
                         time.sleep(2)
                         bot.sync_daily_pnl(api)
                     continue
@@ -525,12 +523,12 @@ def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: Ord
                     trade_type = None
                     
                     # Check CE entry
-                    if bot.check_entry_conditions_ce(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable):
+                    if bot.check_entry_conditions_ce(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable, current_spot):
                         logger.info(f"Entry signal detected for {underlying} CE")
                         trade_type = TradeType.CE
                     
                     # Check PE entry
-                    elif bot.check_entry_conditions_pe(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable):
+                    elif bot.check_entry_conditions_pe(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable, current_spot):
                         logger.info(f"Entry signal detected for {underlying} PE")
                         trade_type = TradeType.PE
                     
