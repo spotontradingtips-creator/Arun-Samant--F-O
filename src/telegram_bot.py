@@ -142,8 +142,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Parses the callback query and updates message accordingly"""
     query = update.callback_query
-    await query.answer()
+    
+    # [FIX] Handle expired callback queries gracefully
+    try:
+        await query.answer()
+    except Exception as e:
+        logger.warning(f"Failed to answer callback query: {e}")
+        # If the query is too old, just exit the function as the user needs a new menu
+        if "Query is too old" in str(e):
+            await context.bot.send_message(
+                chat_id=query.message.chat_id, 
+                text="⚠️ Your control menu expired. Please type /start to get a fresh menu."
+            )
+            return
 
     if query.from_user.id != ADMIN_ID:
         return
