@@ -172,10 +172,21 @@ def get_market_data_with_indicators(
             last_hist_close = intraday_df.iloc[-1]['close']
             gap_pct = abs(current_spot - last_hist_close) / last_hist_close * 100
             
+            # [RELAXED DURING OPEN] Allow larger gaps (up to 3%) during the first 15 mins (Monday Gaps)
+            current_time_ist = now_ist().time()
+            stability_threshold = config.data_stability_threshold_pct
+            market_open_buffer_end = datetime.strptime("09:30:00", "%H:%M:%S").time()
+            
+            if current_time_ist < market_open_buffer_end:
+                stability_threshold = max(3.0, stability_threshold)
+            
             is_stable = is_calibrated
-            if gap_pct > config.data_stability_threshold_pct:
-                logger.critical(f"DATA INSTABILITY for {symbol}: Gap {gap_pct:.4f}% exceeds {config.data_stability_threshold_pct}% threshold!")
+            if gap_pct > stability_threshold:
+                logger.critical(f"DATA INSTABILITY for {symbol}: Gap {gap_pct:.4f}% exceeds {stability_threshold}% threshold!")
                 is_stable = False
+            else:
+                if gap_pct > config.data_stability_threshold_pct:
+                    logger.info(f"DATA STABILITY: {symbol} Gap {gap_pct:.4f}% accepted under Market Open Buffer.")
                 
         else:
             intraday_df_live = intraday_df

@@ -251,7 +251,7 @@ class MStockAPI:
             "NIFTY 50": "^NSEI",
             "NIFTY BANK": "^NSEBANK",
             "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS",
-            "SENSEX": "^BSESN"
+            "SENSEX": "SENSEX.BO"
         }
         
         if symbol in yf_symbols and timeframe == "15minute":
@@ -380,7 +380,7 @@ class MStockAPI:
 
             # Fallback for 1-minute index data (mStock token 51 often 400s for 1m)
             if response.status_code != 200 or data.get("status") != "success":
-                yf_symbols = {"SENSEX": "^BSESN", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
+                yf_symbols = {"SENSEX": "SENSEX.BO", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
                 if timeframe == "1minute" and symbol in yf_symbols:
                     try:
                         import yfinance as yf
@@ -402,7 +402,7 @@ class MStockAPI:
             candles = data.get("data", {}).get("candles", [])
             if not candles:
                 # Same yf fallback for empty candles
-                yf_symbols = {"SENSEX": "^BSESN", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
+                yf_symbols = {"SENSEX": "SENSEX.BO", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
                 if timeframe == "1minute" and symbol in yf_symbols:
                     try:
                         import yfinance as yf
