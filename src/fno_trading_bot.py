@@ -258,7 +258,8 @@ class FnOTradingBot:
                 
             # Predicted strike for the potential new trade (Accounting for ITM/OTM adjustments)
             target_strike, _ = OptionSelector.select_option(underlying, current_spot, "PE", depth=self.config.strike_depth)
-            
+            # Check if we have already traded this specific strike & type today
+            today_date = now_ist().date()
             for trade in self.closed_trades:
                 if (trade.underlying == underlying and 
                     trade.entry_time.date() == today_date and
