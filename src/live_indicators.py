@@ -53,7 +53,7 @@ class LiveIndicators:
             spot_price = quote.get('last_price', 0) if quote else 0
             
             # Fetch daily data
-            daily_df = self.api.get_historical_data(symbol, exchange, instrument_token, "day", days=60)
+            daily_df = self.api.get_historical_data(symbol, exchange, instrument_token, "day", days=250)
             if daily_df is None or len(daily_df) < 30:
                 logger.warning(f"Insufficient daily data for {symbol}")
                 return self._empty_indicators()

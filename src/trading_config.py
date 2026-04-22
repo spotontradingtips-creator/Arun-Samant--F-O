@@ -5,7 +5,7 @@ Centralized configuration for F&O Trading Bot
 
 from dataclasses import dataclass, field
 from datetime import time
-from typing import Dict
+from typing import Dict, List, Optional
 import json
 import os
 import logging
@@ -19,12 +19,16 @@ class TradingConfig:
     
     # Capital Management
     initial_capital: float = 100000.0  # Starting capital in INR
-    daily_loss_limit_pct: float = 3.0  # Maximum daily loss percentage
+    daily_loss_limit_pct: float = 5.0  # Maximum daily loss percentage (Neural Manifest)
     
     # Trading Hours (IST)
     market_open: time = time(9, 15)    # 9:15 AM
     market_close: time = time(15, 30)  # 3:30 PM
     entry_cutoff: time = time(15, 15)  # 3:15 PM - no new entries after this
+    morning_buffer_minutes: int = 15   # 15 min buffer (start at 9:30 AM)
+    
+    # 1st Trade Safety Hard Limit
+    first_trade_hard_loss_limit: float = 1500.0 # Exit 1st trade if loss exceeds this
     
     # VIX Configuration
     vix_min_threshold: float = 10.0    # Skip trading if VIX < this
@@ -33,7 +37,7 @@ class TradingConfig:
     # For CE: SL triggers when spot DROPS by percentage
     # For PE: SL triggers when spot RISES by percentage
     vix_sl_ranges: Dict = field(default_factory=lambda: {
-        "NIFTY50": {
+        "NIFTY": {
             "base_sl": 0.70,
             "low": (12, 15, 0.70),
             "mid": (15, 20, 0.75),
@@ -42,12 +46,6 @@ class TradingConfig:
         "BANKNIFTY": {
             "base_sl": 1.20,
             "low": (12, 15, 1.20),
-            "mid": (15, 20, 1.25),
-            "high": (20, 100, 1.50)
-        },
-        "FINNIFTY": {
-            "base_sl": 1.00,
-            "low": (12, 15, 1.00),
             "mid": (15, 20, 1.25),
             "high": (20, 100, 1.50)
         },
@@ -60,7 +58,7 @@ class TradingConfig:
     })
     
     # Profit Targets (Based on AMOUNT, editable)
-    profit_target_amount: float = 350.0    # Profit target in Rs (Fixed Rule)
+    profit_target_amount: float = 2000.0   # Profit target in Rs (Hardcoded Default)
     
     # Safety Net (Max Premium Loss)
     max_premium_loss_percent: float = -50.0 # Force exit if premium drops by this %
@@ -81,23 +79,37 @@ class TradingConfig:
     
     # RSI Range for Entry (CE - Call Options)
     rsi_min: float = 30.0
-    rsi_max: float = 65.0
+    rsi_max: float = 70.0
     
     # RSI Range for Entry (PE - Put Options)
     # Wider upper bound allows PE entries when market is overbought (prime reversal territory)
     rsi_pe_min: float = 35.0
-    rsi_pe_max: float = 75.0
+    rsi_pe_max: float = 70.0
     
     # ADX Threshold
-    adx_min: float = 25.0              # Minimum ADX for trend strength (OPTIONAL - can be ignored)
-    adx_daily_min: float = 25.0        # Minimum Daily ADX for higher timeframe trend
+    adx_min: float = 30.0              # [HUNTER] Minimum ADX for trend strength
+    adx_daily_min: float = 30.0        # [HUNTER] Minimum Daily ADX
     
+    # Hunter Momentum Jump (Aggressiveness Filter)
+    momentum_jump: float = 2.0         # Must jump by +2.0 (CE) or -2.0 (PE) vs prev bar
+    rsi_flow_required: bool = True     # RSI must be rising for CE, falling for PE
+    
+    # MACD Histogram Thresholds (Momentum Guards)
+    macd_hist_threshold_nifty: float = 8.0
+    macd_hist_threshold_others: float = 10.0
+    
+    # Index Persistence (Rule-Aligned)
+    index_rules: Dict = field(default_factory=lambda: {
+        "NIFTY": {"expiry": "weekly", "broker_sym": "Nifty 50", "token": "26000", "ticker": "^NSEI"},
+        "BANKNIFTY": {"expiry": "monthly", "broker_sym": "NIFTY BANK", "token": "26009", "ticker": "^NSEBANK"},
+        "SENSEX": {"expiry": "weekly", "broker_sym": "SENSEX", "token": "51", "ticker": "^BSESN"}
+    })
+
     # Lot Sizes
     lot_sizes: Dict = field(default_factory=lambda: {
-        "NIFTY50": 65,                 # 1 lot = 65 quantity
-        "BANKNIFTY": 30,               # 1 lot = 30 quantity
-        "FINNIFTY": 60,                # 1 lot = 60 quantity
-        "SENSEX": 20                   # 1 lot = 20 quantity
+        "NIFTY": 65,
+        "BANKNIFTY": 30,
+        "SENSEX": 20
     })
     
     # Position Management
@@ -106,6 +118,16 @@ class TradingConfig:
     
     # Trading Mode
     live_trading: bool = True              # True = Live orders, False = Paper trading
+    
+    # Dynamic TSL Ladder
+    tsl_ladder: List[Dict] = field(default_factory=lambda: [
+        {"threshold": 250.0, "lock": 150.0},
+        {"threshold": 350.0, "lock": 150.0},
+        {"threshold": 700.0, "lock": 500.0},
+        {"threshold": 1050.0, "lock": 750.0},
+        {"threshold": 1400.0, "lock": 1000.0},
+        {"threshold": 1750.0, "lock": 1250.0}
+    ])
     
     # Strike Selection
     strike_depth: int = 0                  # 0=ATM, 1=ITM1, 2=ITM2 etc.
@@ -187,6 +209,8 @@ class TradingConfig:
                 if 'entry_cutoff' in hours:
                     h, m = map(int, hours['entry_cutoff'].split(':'))
                     self.entry_cutoff = time(h, m)
+                self.morning_buffer_minutes = hours.get('morning_buffer_minutes', self.morning_buffer_minutes)
+                self.first_trade_hard_loss_limit = hours.get('first_trade_hard_loss_limit', self.first_trade_hard_loss_limit)
             
             # Load indicator settings
             if 'indicators' in config_data:
@@ -211,13 +235,19 @@ class TradingConfig:
                 self.rsi_period = ind.get('rsi_period', self.rsi_period)
                 self.adx_period = ind.get('adx_period', self.adx_period)
             
+            # Load dynamic TSL ladder
+            if 'tsl_ladder' in config_data:
+                self.tsl_ladder = config_data['tsl_ladder']
+                # Sort by threshold to ensure correct logic execution
+                self.tsl_ladder.sort(key=lambda x: x.get('threshold', 0))
+            
             logger.info(f"[OK] Configuration loaded from '{config_file}'")
             logger.info(f"   [!] LIVE TRADING MODE: {'ENABLED' if self.live_trading else 'DISABLED (Paper)'}")
             logger.info(f"   Initial Capital: Rs {self.initial_capital:,.2f}")
             logger.info(f"   Profit Target: Rs {self.profit_target_amount}")
-            logger.info(f"   Nifty SL: {self.vix_sl_ranges['NIFTY50']['base_sl']}%")
+            logger.info(f"   Nifty SL: {self.vix_sl_ranges['NIFTY']['base_sl']}%")
             logger.info(f"   BankNifty SL: {self.vix_sl_ranges['BANKNIFTY']['base_sl']}%")
-            logger.info(f"   Nifty Lot Size: {self.lot_sizes['NIFTY50']} x {self.default_num_lots} lots")
+            logger.info(f"   Nifty Lot Size: {self.lot_sizes['NIFTY']} x {self.default_num_lots} lots")
             logger.info(f"   BankNifty Lot Size: {self.lot_sizes['BANKNIFTY']} x {self.default_num_lots} lots")
             
         except Exception as e:
@@ -231,7 +261,7 @@ class TradingConfig:
         Parameters:
         -----------
         underlying : str
-            'NIFTY50' or 'BANKNIFTY'
+            'NIFTY', 'BANKNIFTY', etc.
         vix : float
             Current VIX value
             
@@ -240,41 +270,52 @@ class TradingConfig:
         float
             Stop loss percentage
         """
-        if underlying not in self.vix_sl_ranges:
+        from src.utils import normalize_symbol
+        normalized = normalize_symbol(underlying)
+        
+        if normalized not in self.vix_sl_ranges:
             return 0.70  # Default
         
-        ranges = self.vix_sl_ranges[underlying]
+        ranges = self.vix_sl_ranges[normalized]
         
         # Check VIX ranges
+        vix_val = float(vix)
         for range_key in ['low', 'mid', 'high']:
             vix_min, vix_max, sl_pct = ranges[range_key]
-            if vix_min <= vix < vix_max:
+            if vix_min <= vix_val < vix_max:
                 return sl_pct
         
         # Default to base SL
         return ranges['base_sl']
     
     def get_lot_size(self, underlying: str) -> int:
-        """Get lot size for underlying"""
-        # Normalize keys
-        key_map = {
-            "NIFTY": "NIFTY50", 
-            "NIFTY 50": "NIFTY50",
-            "NIFTYBANK": "BANKNIFTY",
-            "NIFTY BANK": "BANKNIFTY",
-            "NIFTYFINSERVICE": "FINNIFTY",
-            "NIFTY FIN SERVICE": "FINNIFTY"
-        }
-        normalized = key_map.get(underlying, underlying)
-        return self.lot_sizes.get(normalized, 65)  # Default to NIFTY lot size if not found
+        """Get lot size for underlying using standardized keys"""
+        from src.utils import normalize_symbol
+        normalized = normalize_symbol(underlying)
+        return self.lot_sizes.get(normalized, 65)  # Default to 65 if not found
+
+    def get_macd_threshold(self, underlying: str) -> float:
+        """Get MACD Histogram threshold for underlying"""
+        if "NIFTY" in underlying and "BANK" not in underlying:
+             return self.macd_hist_threshold_nifty # 8
+        return self.macd_hist_threshold_others # 10
     
     def is_market_open(self, current_time: time) -> bool:
         """Check if market is currently open"""
         return self.market_open <= current_time <= self.market_close
     
     def can_enter_new_position(self, current_time: time) -> bool:
-        """Check if new positions can be entered"""
-        return self.market_open <= current_time < self.entry_cutoff
+        """
+        Check if new positions can be entered, enforcing the 
+        mandatory 9:30 AM morning buffer (Rule 7).
+        """
+        import datetime
+        # Calculate effective start time (9:15 AM + 15 mins = 9:30 AM)
+        base_datetime = datetime.datetime.combine(datetime.date.today(), self.market_open)
+        effective_start_datetime = base_datetime + datetime.timedelta(minutes=self.morning_buffer_minutes)
+        effective_start_time = effective_start_datetime.time()
+        
+        return effective_start_time <= current_time < self.entry_cutoff
 
 
 # Global config instance

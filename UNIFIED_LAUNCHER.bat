@@ -31,6 +31,12 @@ start "SENTINEL_BRAIN_LOGS" cmd /k "python src/api/main_api.py"
 echo [SYSTEM] Waiting 5 seconds for Brain initialization...
 timeout /t 5 /nobreak > nul
 
+:: NEW: Launching Telegram Control
+echo.
+echo [2.5/3] Launching Sentinel Control (Telegram)...
+echo.
+start "SENTINEL_CONTROL" cmd /k "python src/telegram_bot.py"
+
 :: 3. Launching Engine
 echo.
 echo [3/3] Launching Sentinel Bot Engine...

@@ -14,6 +14,11 @@ start "SENTINEL_API" cmd /k "python src/api/main_api.py"
 :: Wait for API to initialize
 timeout /t 3 /nobreak > nul
 
+:: Start the Telegram Control Center
+echo [SYSTEM] Launching Sentinel Control (Telegram)...
+start "SENTINEL_CONTROL" cmd /k "python src/telegram_bot.py"
+timeout /t 2 /nobreak > nul
+
 :: Start the Trading Bot
 echo [SYSTEM] Connecting Sentinel Bot to Core...
 echo.

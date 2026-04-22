@@ -98,13 +98,53 @@ def get_daily_pnl():
         logger.error(f"Error calculating P&L: {e}")
         return 0.0, 0.0, 0
 
+def get_eod_metrics():
+    """Calculate EOD Stats for Telegram Alert"""
+    try:
+        history = StateManager.load_history()
+        today = now_ist().date()
+        
+        daily_pnl = 0.0
+        daily_trades = 0
+        daily_wins = 0
+        
+        monthly_pnl = 0.0
+        monthly_trades = 0
+        monthly_wins = 0
+        
+        for p in history:
+            trade_date = p.entry_time.date()
+            if p.pnl is not None:
+                # Monthly stats
+                if trade_date.month == today.month and trade_date.year == today.year:
+                    monthly_pnl += p.pnl
+                    monthly_trades += 1
+                    if p.pnl > 0:
+                        monthly_wins += 1
+                
+                # Daily stats
+                if trade_date == today:
+                    daily_pnl += p.pnl
+                    daily_trades += 1
+                    if p.pnl > 0:
+                        daily_wins += 1
+                        
+        daily_winrate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
+        monthly_winrate = (monthly_wins / monthly_trades * 100) if monthly_trades > 0 else 0.0
+        
+        return daily_pnl, daily_trades, daily_winrate, monthly_pnl, monthly_trades, monthly_winrate, today
+    except Exception as e:
+        logger.error(f"Error calculating EOD metrics: {e}")
+        return 0.0, 0, 0.0, 0.0, 0, 0.0, now_ist().date()
+
 def get_control_keyboard():
     """Returns the persistent bottom keyboard"""
     keyboard = [
-        ["START BOT", "STOP BOT"],
-        ["PERFORMANCE", "REFRESH"]
+        ["🟢 START BOT", "🛑 STOP BOT"],
+        ["📋 ACTIVE P&L", "📈 EOD SUMMARY"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
 
 # --- Command Handlers ---
 
@@ -124,12 +164,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Re-initializing Sentinel... (Bottom menu restored)", reply_markup=reply_markup)
     
     status = "RUNNING" if is_bot_running() else "STOPPED"
-    keyboard = [
-        [InlineKeyboardButton("START BOT", callback_data='start_bot'),
-         InlineKeyboardButton("STOP BOT", callback_data='stop_bot')],
-        [InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
-         InlineKeyboardButton("REFRESH", callback_data='status_check')]
-    ]
+    
+    # Check if bot is paused
+    is_paused = StateManager.is_paused()
+    if is_paused:
+        status = "⏸️ PAUSED"
+    
+    keyboard = []
+    if not is_paused:
+        keyboard.append([InlineKeyboardButton("START BOT", callback_data='start_bot'),
+                         InlineKeyboardButton("STOP BOT", callback_data='stop_bot')])
+    else:
+        keyboard.append([InlineKeyboardButton("▶️ RESUME TRADING", callback_data='resume_bot'),
+                         InlineKeyboardButton("STOP BOT", callback_data='stop_bot')])
+        
+    keyboard.append([InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
+                     InlineKeyboardButton("REFRESH", callback_data='status_check')])
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"**SENTINEL COMMAND CENTER**\n\n"
@@ -197,6 +248,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await context.bot.send_message(chat_id=query.message.chat_id, text="FAILED TO STOP BOT.", reply_markup=InlineKeyboardMarkup(keyboard))
 
+    elif query.data == 'resume_bot':
+        keyboard = [[InlineKeyboardButton(" BACK TO MENU", callback_data='status_check')]]
+        try:
+            await query.message.delete()
+        except:
+            pass
+            
+        # Set pause to False in persistence
+        StateManager.set_paused(False)
+        await context.bot.send_message(chat_id=query.message.chat_id, text="✅ TRADING RESUMED. Bot is now scanning for signals.", reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif query.data == 'pnl_check':
         active, closed, count = get_daily_pnl()
         total = active + closed
@@ -218,12 +280,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == 'status_check':
         status = "RUNNING" if is_bot_running() else "STOPPED"
-        keyboard = [
-            [InlineKeyboardButton("START BOT", callback_data='start_bot'),
-             InlineKeyboardButton("STOP BOT", callback_data='stop_bot')],
-            [InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
-             InlineKeyboardButton("REFRESH", callback_data='status_check')]
-        ]
+        is_paused = StateManager.is_paused()
+        if is_paused:
+            status = "⏸️ PAUSED"
+            
+        keyboard = []
+        if not is_paused:
+            keyboard.append([InlineKeyboardButton("START BOT", callback_data='start_bot'),
+                             InlineKeyboardButton("STOP BOT", callback_data='stop_bot')])
+        else:
+            keyboard.append([InlineKeyboardButton("▶️ RESUME TRADING", callback_data='resume_bot'),
+                             InlineKeyboardButton("STOP BOT", callback_data='stop_bot')])
+            
+        keyboard.append([InlineKeyboardButton("PERFORMANCE", callback_data='pnl_check'),
+                         InlineKeyboardButton("REFRESH", callback_data='status_check')])
+
         try:
             await query.message.delete()
         except:
@@ -246,7 +317,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_text = update.message.text.strip()
     
     # 1. HANDLE PERSISTENT KEYBOARD COMMANDS
-    if msg_text == "START BOT":
+    if msg_text == "START BOT" or msg_text == "🟢 START BOT":
         if is_bot_running():
             await update.message.reply_text("BOT IS ALREADY RUNNING.")
         else:
@@ -256,7 +327,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(3)
             await update.message.reply_text("BOT STARTED SUCCESSFULLY.")
 
-    elif msg_text == "STOP BOT":
+    elif msg_text == "STOP BOT" or msg_text == "🛑 STOP BOT":
         if not is_bot_running():
             await update.message.reply_text("BOT IS NOT RUNNING.")
         else:
@@ -269,7 +340,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await update.message.reply_text("FAILED TO STOP BOT.")
 
-    elif msg_text == "PERFORMANCE":
+    elif msg_text == "PERFORMANCE" or msg_text == "📋 ACTIVE P&L":
         active, closed, count = get_daily_pnl()
         total = active + closed
         msg = (
@@ -281,6 +352,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"**TOTAL P&L: Rs {total:,.2f}**"
         )
         await update.message.reply_text(msg, parse_mode='Markdown')
+
+    elif msg_text == "📈 EOD SUMMARY":
+        try:
+            from src.notifications import notify_eod_summary
+            daily_pnl, daily_trades, daily_winrate, monthly_pnl, monthly_trades, monthly_winrate, today = get_eod_metrics()
+            month_str = today.strftime('%B')
+            date_str = today.strftime('%B %d, %Y')
+            notify_eod_summary(date_str, month_str, daily_pnl, daily_trades, daily_winrate, monthly_pnl, monthly_trades, monthly_winrate)
+            await update.message.reply_text("EOD Summary pushed successfully.")
+        except Exception as e:
+            logger.error(f"EOD summary trigger failed: {e}")
+            await update.message.reply_text(f"Failed to generate EOD summary: {e}")
 
     elif msg_text == "REFRESH":
         status = "RUNNING" if is_bot_running() else "STOPPED"

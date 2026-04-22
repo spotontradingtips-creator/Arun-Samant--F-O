@@ -52,6 +52,8 @@ class OptionSelector:
     def _normalize_symbol(underlying: str) -> str:
         """Map internal names to Master File symbol names"""
         mapping = {
+            "NIFTY 50": "NIFTY",
+            "NIFTY BANK": "BANKNIFTY",
             "NIFTY50": "NIFTY",
             "NIFTYBANK": "BANKNIFTY",
             "BANKNIFTY": "BANKNIFTY", 
@@ -100,10 +102,20 @@ class OptionSelector:
         # Normalize Underlying (NIFTY50 -> NIFTY)
         master_symbol = OptionSelector._normalize_symbol(underlying)
         
-        nearest_expiry = SymbolMaster().get_nearest_expiry(master_symbol)
+        nearest_expiry = None
+        is_monthly = False
+        
+        if master_symbol == "BANKNIFTY":
+            # [IMMUTABLE] BANKNIFTY ONLY HAS MONTHLY EXPIRY (SEBI 2026 Regulations)
+            nearest_expiry = SymbolMaster().get_monthly_expiry(master_symbol)
+            is_monthly = True
+        else:
+            # Nifty and Sensex still use Weekly (Nearest)
+            nearest_expiry = SymbolMaster().get_nearest_expiry(master_symbol)
         
         if nearest_expiry:
-            logger.info(f"{underlying} (mapped to {master_symbol}): Nearest Expiry = {nearest_expiry}")
+            expiry_type = "Monthly" if is_monthly else "Weekly"
+            logger.info(f"{underlying} (mapped to {master_symbol}): {expiry_type} Expiry = {nearest_expiry}")
             return nearest_expiry
             
         logger.error(f"No expiry found for {underlying} (mapped to {master_symbol})!")
@@ -171,7 +183,8 @@ class OptionSelector:
         # Construct symbol
         symbol = OptionSelector.get_option_symbol(underlying, selected_strike, option_type, expiry)
         
-        expiry_type = "Weekly"
+        master_symbol = OptionSelector._normalize_symbol(underlying)
+        expiry_type = "Monthly" if master_symbol == "BANKNIFTY" else "Weekly"
         
         depth_label = "ATM" if depth == 0 else f"ITM-{depth}"
         logger.info(f"[OK] Selected: {symbol} | Strike: {selected_strike} ({depth_label}) | Type: {option_type} | Expiry: {expiry_type}")

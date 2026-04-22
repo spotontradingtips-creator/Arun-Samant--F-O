@@ -33,7 +33,7 @@ class FnOTradingBot:
     F&O Trading Bot implementing MACD + RSI + ADX strategy
     """
     
-    def __init__(self, config: TradingConfig):
+    def __init__(self, config: TradingConfig, api: Optional['MStockAPI'] = None):
         """
         Initialize trading bot
         
@@ -41,8 +41,11 @@ class FnOTradingBot:
         -----------
         config : TradingConfig
             Trading configuration
+        api : MStockAPI, optional
+            API instance
         """
         self.config = config
+        self.api = api
         self.initial_capital = config.initial_capital
         self.current_capital = config.initial_capital
         
@@ -53,6 +56,7 @@ class FnOTradingBot:
         self.positions: Dict[str, Position] = {}  # Active positions
         # Daily tracking
         self.daily_pnl = 0.0
+        self.daily_max_pnl = 0.0
         self.daily_trades = 0
         self.closed_trades: List[Position] = []  # Initialize early to prevent AttributeError
         
@@ -75,7 +79,18 @@ class FnOTradingBot:
                 today_trades = [p for p in loaded_history if p.entry_time.date() == today_date]
                 self.daily_trades = len(today_trades)
                 self.daily_pnl = sum(p.pnl for p in today_trades if p.pnl is not None)
-                self.daily_max_pnl = max(0.0, self.daily_pnl) # Peak profit reached today
+                
+                # [MANDATORY] Restore Daily State (Peak P&L)
+                state = StateManager.load_daily_state()
+                if state.get('date') == str(today_date):
+                    self.daily_max_pnl = state.get('daily_max_pnl', max(0.0, self.daily_pnl))
+                    # Also restore daily_pnl if it's more accurate than history sum
+                    # (Broker sync usually keeps this most accurate)
+                    self.daily_pnl = state.get('daily_pnl', self.daily_pnl)
+                    logger.info(f"Restored Daily Peak: Rs {self.daily_max_pnl:.2f} (from state file)")
+                else:
+                    self.daily_max_pnl = max(0.0, self.daily_pnl) # Peak profit reached today
+                
                 logger.info(f"Restored {len(self.closed_trades)} total historical trades ({self.daily_trades} from today).")
         except Exception as e:
             logger.error(f"Error loading state: {e}")
@@ -89,6 +104,17 @@ class FnOTradingBot:
         
         # Initial state restored
     
+    def sync_starting_capital(self, capital: float):
+        """
+        Synchronize starting capital with broker API (Rule 2).
+        This becomes the baseline for Daily Loss Limit (Rule 1.1).
+        """
+        with self.lock:
+            self.initial_capital = capital
+            self.current_capital = capital
+            self.daily_start_capital = capital
+            logger.info(f"SYNCHING STARTING CAPITAL: [bold green]Rs {capital:,.2f}[/bold green] (Synced via API)")
+            
     def check_entry_conditions_ce(
         self,
         underlying: str,
@@ -97,7 +123,8 @@ class FnOTradingBot:
         current_row_idx: int,
         vix: float,
         data_is_stable: bool = True,
-        current_spot: float = 0.0
+        current_spot: float = 0.0,
+        data_is_fresh: bool = True
     ) -> bool:
         """
         Check all 8 MANDATORY conditions for CALL (CE) entry
@@ -110,6 +137,18 @@ class FnOTradingBot:
         # Condition 0: Data Stability Guard (HARDCODED SAFETY)
         if not data_is_stable:
              logger.critical(f"{underlying} [CE]: ENTRY BLOCKED - Data Stability Guard Triggered.")
+             return False
+        
+        # Condition 0c: Daily Loss Limit Guard (Neural Manifest Rule 1.1)
+        # Block entries if current loss exceeds 5% of synchronized capital
+        loss_threshold = self.daily_start_capital * (self.config.daily_loss_limit_pct / 100.0)
+        if self.daily_pnl <= -loss_threshold:
+             logger.critical(f"{underlying} [CE]: ENTRY BLOCKED - Daily Loss Limit Reached (Limit: Rs {loss_threshold:.2f}).")
+             return False
+        
+        # Condition 0d: Data Freshness Guard (Anti-Blind Rule)
+        if not data_is_fresh:
+             logger.warning(f"{underlying} [CE]: ENTRY BLOCKED - Data is STALE (Synthesis Mode).")
              return False
         # DEFENSIVE CODE: Ensure closed_trades exists
         if not hasattr(self, 'closed_trades'):
@@ -200,20 +239,27 @@ class FnOTradingBot:
                 return False
             logger.info(f"{underlying} [CE]: Subsequent Trade - Trend Active (No Fresh Cross Needed).")
         
-        # Condition 6b: MACD Histogram Momentum (Dark Green)
-        # Check if Histogram is positive and increasing
+        # Condition 6b: MACD Histogram Momentum (Hunter Logic)
         hist_val = intraday_data['MACD_Hist'].iloc[current_row_idx]
         prev_hist_val = intraday_data['MACD_Hist'].iloc[current_row_idx - 1] if current_row_idx > 0 else 0
+        jump = hist_val - prev_hist_val
+        threshold = self.config.get_macd_threshold(underlying)
         
-        if hist_val <= 0 or hist_val <= prev_hist_val:
-            logger.info(f"{underlying} [CE]: MACD Histogram not Dark Green (Hist: {hist_val:.2f}, Prev: {prev_hist_val:.2f})")
-            return False
-        logger.info(f"{underlying} [CE]: MACD Histogram Dark Green (Momentum Increasing).")
+        if hist_val < threshold or jump < self.config.momentum_jump:
+             logger.info(f"{underlying} [CE]: Momentum Insufficient (Hist: {hist_val:.2f} < {threshold} OR Jump: {jump:.2f} < {self.config.momentum_jump})")
+             return False
+        logger.info(f"{underlying} [CE]: MACD Histogram Hunter Momentum Active.")
         
-        # Condition 7: 15m RSI in range (45-65)
+        # Condition 7: 15m RSI in range and Rising
         rsi = current_row['RSI']
+        prev_rsi = intraday_data['RSI'].iloc[current_row_idx - 1] if current_row_idx > 0 else rsi
+        
         if not (self.config.rsi_min <= rsi <= self.config.rsi_max):
             logger.info(f"{underlying} [CE]: RSI Check Failed (Value: {rsi:.2f} | Range: {self.config.rsi_min}-{self.config.rsi_max})")
+            return False
+            
+        if self.config.rsi_flow_required and rsi <= prev_rsi:
+            logger.info(f"{underlying} [CE]: RSI Flow Check Failed (Value: {rsi:.2f} <= Prev: {prev_rsi:.2f})")
             return False
         # Condition 8: ADX filter removed per user update
 
@@ -236,7 +282,8 @@ class FnOTradingBot:
         current_row_idx: int,
         vix: float,
         data_is_stable: bool = True,
-        current_spot: float = 0.0
+        current_spot: float = 0.0,
+        data_is_fresh: bool = True
     ) -> bool:
         """
         Check all 8 MANDATORY conditions for PUT (PE) entry
@@ -244,6 +291,18 @@ class FnOTradingBot:
         # Condition 0: Data Stability Guard (HARDCODED SAFETY)
         if not data_is_stable:
              logger.critical(f"{underlying} [PE]: ENTRY BLOCKED - Data Stability Guard Triggered.")
+             return False
+             
+        # Condition 0c: Daily Loss Limit Guard (Neural Manifest Rule 1.1)
+        # Block entries if current loss exceeds 5% of synchronized capital
+        loss_threshold = self.daily_start_capital * (self.config.daily_loss_limit_pct / 100.0)
+        if self.daily_pnl <= -loss_threshold:
+             logger.critical(f"{underlying} [PE]: ENTRY BLOCKED - Daily Loss Limit Reached (Limit: Rs {loss_threshold:.2f}).")
+             return False
+             
+        # Condition 0d: Data Freshness Guard (Anti-Blind Rule)
+        if not data_is_fresh:
+             logger.warning(f"{underlying} [PE]: ENTRY BLOCKED - Data is STALE (Synthesis Mode).")
              return False
         # DEFENSIVE CODE: Ensure closed_trades exists
         if not hasattr(self, 'closed_trades'):
@@ -325,20 +384,27 @@ class FnOTradingBot:
                 return False
             logger.info(f"{underlying} [PE]: Subsequent Trade - Trend Active (No Fresh Cross Needed).")
         
-        # Condition 6b: MACD Histogram Momentum (Dark Red)
-        # Check if Histogram is negative and decreasing
+        # Condition 6b: MACD Histogram Momentum (Hunter Logic)
         hist_val = intraday_data['MACD_Hist'].iloc[current_row_idx]
         prev_hist_val = intraday_data['MACD_Hist'].iloc[current_row_idx - 1] if current_row_idx > 0 else 0
+        jump = hist_val - prev_hist_val
+        threshold = -self.config.get_macd_threshold(underlying) # Negative for PE
         
-        if hist_val >= 0 or hist_val >= prev_hist_val:
-            logger.info(f"{underlying} [PE]: MACD Histogram not Dark Red (Hist: {hist_val:.2f}, Prev: {prev_hist_val:.2f})")
-            return False
-        logger.info(f"{underlying} [PE]: MACD Histogram Dark Red (Momentum Increasing).")
+        if hist_val > threshold or jump > -self.config.momentum_jump:
+             logger.info(f"{underlying} [PE]: Momentum Insufficient (Hist: {hist_val:.2f} > {threshold} OR Jump: {jump:.2f} > -{self.config.momentum_jump})")
+             return False
+        logger.info(f"{underlying} [PE]: MACD Histogram Hunter Momentum Active.")
         
-        # Condition 7: 15m RSI in range (PE-specific: 35-75, allows overbought entries)
+        # Condition 7: 15m RSI in range and Falling
         rsi = current_row['RSI']
+        prev_rsi = intraday_data['RSI'].iloc[current_row_idx - 1] if current_row_idx > 0 else rsi
+        
         if not (self.config.rsi_pe_min <= rsi <= self.config.rsi_pe_max):
             logger.info(f"{underlying} [PE]: RSI Check Failed (Value: {rsi:.2f} | Range: {self.config.rsi_pe_min}-{self.config.rsi_pe_max})")
+            return False
+            
+        if self.config.rsi_flow_required and rsi >= prev_rsi:
+            logger.info(f"{underlying} [PE]: RSI Flow Check Failed (Value: {rsi:.2f} >= Prev: {prev_rsi:.2f})")
             return False
         # Condition 9: Daily ADX > 25
         daily_row = daily_data.iloc[-1]
@@ -489,6 +555,22 @@ Returns:
         # Priority 1: Stop Loss
         if position.check_sl_hit(current_underlying_price):
             return ExitReason.STOP_LOSS
+            
+        # Priority 1b: 1ST TRADE HARD SL (Rule 7)
+        # If this is the 1st trade of the day, force exit if drawdown > ₹1,500
+        if self.daily_trades <= 1:
+             pnl_amount = position.calculate_pnl(current_premium)
+             if pnl_amount <= -self.config.first_trade_hard_loss_limit:
+                  logger.warning(f"1ST TRADE HARD SL TRIGGERED: Loss (Rs {pnl_amount:.2f}) exceeds limit (Rs {self.config.first_trade_hard_loss_limit})")
+                  return ExitReason.STOP_LOSS
+        
+        # Priority 1c: DAILY LOSS LIMIT (Rule 1.1)
+        # Hard stop if total daily loss hits 5%
+        loss_threshold = self.daily_start_capital * (self.config.daily_loss_limit_pct / 100.0)
+        total_potential_pnl = self.daily_pnl + position.calculate_pnl(current_premium)
+        if total_potential_pnl <= -loss_threshold:
+             logger.critical(f"DAILY LOSS LIMIT REACHED (Hard Stop): Total P&L (Rs {total_potential_pnl:.2f}) hits limit (Rs {loss_threshold:.2f})")
+             return ExitReason.STOP_LOSS
         
         # Priority 2: Profit Target
         if position.check_profit_hit(current_premium, self.config.profit_target_amount):
@@ -569,7 +651,8 @@ Returns:
         underlying: str,
         exit_price: float,
         exit_underlying_price: float,
-        exit_reason: ExitReason
+        exit_reason: ExitReason,
+        api: Optional['MStockAPI'] = None
     ) -> Optional[Position]:
         """
         Exit an active trade
@@ -627,8 +710,26 @@ Returns:
             exit_premium=exit_price
         )
         
-        return position
-    
+    def update_daily_peak(self, current_total_pnl: float):
+        """Update daily peak for Win-Lock calculations"""
+        with self.lock:
+            if current_total_pnl > self.daily_max_pnl:
+                self.daily_max_pnl = current_total_pnl
+                # Periodic persistence via sync_daily_pnl is usually enough,
+                # but we can save here if it's a significant new peak.
+                
+    def get_win_lock_floor(self) -> float:
+        """
+        Calculate the Win-Lock Floor based on peak P&L.
+        Rule: Step 500, Floor 250.
+        """
+        if self.daily_max_pnl < 500:
+            return 0.0
+        
+        # Calculate how many 500-unit steps we've climbed
+        steps = int(self.daily_max_pnl / 500)
+        return steps * 250
+
     def sync_daily_pnl(self, api):
         """
         Synchronize daily P&L with the broker's actual realized P&L.
@@ -639,23 +740,40 @@ Returns:
             if positions is None:
                 return
                 
+            # Calculate total realized P&L from all broker positions
             total_realized_pnl = 0.0
             for pos in positions:
-                # mStock/Mirae typically provides 'pnl' or 'realized_pnl' in net positions
-                # We want the SUM of all realized P&L for today.
-                pnl = float(pos.get('pnl', pos.get('realized_pnl', 0.0)))
-                total_realized_pnl += pnl
+                # mStock provides 'pnl' or 'realized_pnl' in net positions
+                total_realized_pnl += float(pos.get('pnl', pos.get('realized_pnl', 0.0)))
             
             with self.lock:
                 old_pnl = self.daily_pnl
                 self.daily_pnl = total_realized_pnl
                 
-                # Update daily peak if the verified P&L is higher
+                # [SAFE STARTUP GUARD] 
+                # If current P&L is physically below the floor determined by memory,
+                # we must reset the peak to current P&L to prevent a "Sync-Breach Trap"
+                current_floor_potential = self.get_win_lock_floor()
+                if current_floor_potential > 0 and self.daily_pnl <= (current_floor_potential + 10): # 10 Rs buffer
+                     if self.daily_max_pnl > self.daily_pnl:
+                         logger.warning(f"SYNC BREACH DETECTED: Profit (Rs {self.daily_pnl:.2f}) is below/near Floor (Rs {current_floor_potential:.2f}). Reseting Peak for recovery.")
+                         self.daily_max_pnl = self.daily_pnl
+                
+                # Peak can never be lower than realized realized P&L
                 if self.daily_pnl > self.daily_max_pnl:
                     self.daily_max_pnl = self.daily_pnl
                 
-                if abs(self.daily_pnl - old_pnl) > 10: # Only log significant shifts
+                if abs(self.daily_pnl - old_pnl) > 5.0:
                     logger.info(f"P&L SYNCED WITH BROKER: Local(Rs {old_pnl:.2f}) -> Broker(Rs {self.daily_pnl:.2f})")
+                
+                # Persistence (Rule 41)
+                from src.persistence import StateManager
+                StateManager.save_daily_state({
+                    'date': str(datetime.now().date()),
+                    'daily_max_pnl': self.daily_max_pnl,
+                    'daily_pnl': self.daily_pnl,
+                    'updated_at': datetime.now().isoformat()
+                })
         
         except Exception as e:
             logger.error(f"Error syncing P&L with broker: {e}")

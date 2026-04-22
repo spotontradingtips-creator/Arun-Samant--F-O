@@ -1,6 +1,6 @@
 """
 F&O Trading Bot - Main Entry Point
-Monitors market and executes trades based on technical indicators
+Optimized for TURBO EXECUTION (200ms / Parallel Fetching)
 """
 
 import pandas as pd
@@ -11,765 +11,475 @@ import time
 import threading
 import json
 from datetime import datetime
+import traceback
 
 # Add src to path
 sys.path.insert(0, os.path.dirname(__file__))
 
 from src.fno_trading_bot import FnOTradingBot
-from src.trading_models import TradeType, ExitReason
+from src.trading_models import TradeType, ExitReason, Position
 from src.indicators import TechnicalIndicators
 from src.trading_config import TradingConfig, config
-from src.market_data import MStockAPI
+from src.market_data import MStockAPI, IPMismatchError
+from src.notifications import notify_system_status
 from src.utils import setup_logging, now_ist, is_trading_day, console, print_holographic_banner
 from src.option_selector import OptionSelector
 from src.order_manager import OrderManager
 from src.symbol_master import SymbolMaster
 from src.position_sync import sync_positions_from_broker
+from src.notifications import notify_heartbeat
 
+# Futuristic styling
 from rich.panel import Panel
 from rich.live import Live
 from rich.table import Table
 from rich import box
 from rich.layout import Layout
 
-# Setup futuristic logging
 os.makedirs("logs", exist_ok=True)
 log_file = f"logs/trading_bot_{datetime.now().strftime('%Y%m%d')}.log"
 logger = setup_logging(log_file)
 
-# Global shutdown flag
 shutdown_event = threading.Event()
 
-
 def wait_for_market_open():
-    """Wait until market opens"""
-    from datetime import time as dtime
-    
+    from datetime import datetime, timedelta
     while not shutdown_event.is_set():
-        current_time = now_ist()
-        
-        # Check if trading day with strict logging
-        if not is_trading_day(current_time):
-            # Calculate next Monday 9:15 AM
-            days_ahead = 7 - current_time.weekday()
-            if days_ahead == 0: days_ahead = 7 # If today is Monday but called before open? No, Monday=0.
-            # If today is Saturday(5) -> Mon(0) is +2 days. 7-5=2. Correct.
-            # If today is Sunday(6) -> Mon(0) is +1 day. 7-6=1. Correct.
+        now = now_ist()
+        if not is_trading_day(now):
+            logger.info("MARKET CLOSED (Weekend/Holiday). System in SLEEP MODE.")
+            time.sleep(3600); continue
             
-            logger.info(f"MARKET CLOSED (Weekend/Holiday). System in SLEEP MODE.")
-            logger.info(f"Will resume automatically on Monday at 09:15 AM.")
-            time.sleep(3600)
-            continue
+        now_t = now.time()
+        # [MANDATORY 9:30 AM START] Rule 7: 9:15 AM + 15m Buffer
+        market_start_dt = datetime.combine(now.date(), config.market_open).replace(tzinfo=now.tzinfo)
+        effective_start_dt = market_start_dt + timedelta(minutes=config.morning_buffer_minutes)
+        effective_start_time = effective_start_dt.time()
         
-        # Check if during market hours
-        current_time_only = current_time.time()
-        if config.market_open <= current_time_only <= config.market_close:
-            logger.info("Market is OPEN - Starting trading bot")
+        if effective_start_time <= now_t <= config.market_close:
+            logger.info(f"Market & Buffer Open ({effective_start_time}) - Commencing Turbo Ops.")
             return
-        
-        # Calculate wait time
-        if current_time_only < config.market_open:
-            logger.info(f"Waiting for market to open at {config.market_open}")
-            time.sleep(60)
+            
+        if now_t < effective_start_time:
+            wait_secs = (effective_start_dt - now).total_seconds()
+            logger.info(f"Waiting for 9:30 AM Start (Rules). Sleeping for {int(wait_secs)}s...")
+            time.sleep(min(wait_secs, 60) if wait_secs > 0 else 1)
         else:
-            logger.info("Market closed for today. Will resume tomorrow.")
+            logger.info("Market closed for today.")
             time.sleep(3600)
 
-
-def get_market_data_with_indicators(
-    api: MStockAPI,
-    symbol: str,
-    exchange: str,
-    instrument_token: str
-) -> tuple:
-    """
-    Fetch market data and calculate indicators with REAL-TIME live candle
-    Creates streaming indicators that update every second
-    """
+def get_market_data_with_indicators(api, symbol, exchange, token):
     try:
-        # Get current spot price FIRST for live candle
         quote = api.get_quote(symbol, exchange)
-        current_spot = quote.get('last_price', 0) if quote else 0
+        spot = quote.get('last_price', 0) if quote else 0
         
-        # Fetch daily data
-        daily_df = api.get_historical_data(symbol, exchange, instrument_token, "day", days=60)
-        if daily_df is None or len(daily_df) < 30:
-            logger.error(f"Insufficient daily data for {symbol}")
-            return None, None, None, None
+        d_df = api.get_historical_data(symbol, exchange, token, "day", days=250)
+        if d_df is None or len(d_df) < 250: 
+            logger.warning(f"[STABILITY] {symbol}: Insufficient Daily History ({len(d_df)}/250 bars). Stabilization Guard active.")
+            return None, None, None, None, False, False
         
-        # Calculate daily indicators (no live candle needed)
-        daily_df['MACD'], daily_df['MACD_Signal'], daily_df['MACD_Hist'] = \
-            TechnicalIndicators.calculate_macd(daily_df['close'])
-        daily_df['RSI'] = TechnicalIndicators.calculate_rsi(daily_df['close'])
-        daily_df['ADX'], daily_df['+DI'], daily_df['-DI'] = \
-            TechnicalIndicators.calculate_adx(daily_df['high'], daily_df['low'], daily_df['close'])
+        d_df['MACD'], d_df['MACD_Signal'], d_df['MACD_Hist'] = TechnicalIndicators.calculate_macd(d_df['close'])
+        d_df['RSI'] = TechnicalIndicators.calculate_rsi(d_df['close'])
+        d_df['ADX'], d_df['+DI'], d_df['-DI'] = TechnicalIndicators.calculate_adx(d_df['high'], d_df['low'], d_df['close'])
         
-        # Fetch intraday 15min data (used for RSI, MACD, ADX)
-        intraday_df, is_calibrated = api.get_hybrid_history(symbol, exchange, instrument_token, "15minute", days=10)
-        if intraday_df is None or len(intraday_df) < 50:
-            logger.error(f"Insufficient intraday data for {symbol}")
-            return None, None, None, None, False
-            
-        # DYNAMIC CALIBRATION: Synchronize History Baseline with Live Price
-        # This prevents "fake" momentum spikes caused by price gaps between history and live quotes.
-        calibrated_offset = 0.0
-        yf_symbols = {"SENSEX": "^BSESN", "NIFTY 50": "^NSEI", "NIFTY BANK": "^NSEBANK", "NIFTY FIN SERVICE": "NIFTY_FIN_SERVICE.NS"}
+        i_df, stable = api.get_hybrid_history(symbol, exchange, token, "15minute", days=10)
         
-        if current_spot > 0 and symbol in yf_symbols:
-            try:
-                # Get the most recent 1m bar globally to find the true current market baseline
-                m1_df = api.get_historical_data(symbol, exchange, instrument_token, "1minute", days=1)
-                if m1_df is not None and not m1_df.empty:
-                    last_m1_price = m1_df.iloc[-1]['close']
-                    calibrated_offset = current_spot - last_m1_price
-                    
-                    if abs(calibrated_offset) > 1.0: # Detect significant drifting
-                        logger.info(f"Dynamic Calibration ({symbol}): Applying live offset of {calibrated_offset:+.2f} to history.")
-                        intraday_df['open'] += calibrated_offset
-                        intraday_df['high'] += calibrated_offset
-                        intraday_df['low'] += calibrated_offset
-                        intraday_df['close'] += calibrated_offset
-            except Exception as e:
-                logger.warning(f"Dynamic Calibration failed for {symbol}: {e}")
+        if i_df is None or len(i_df) < 100: 
+            if i_df is not None:
+                logger.info(f"[WARM-UP] Indicators Warming Up for {symbol}: ({len(i_df)}/100 bars)...")
+            return None, None, None, None, False, False
         
-        # CREATE LIVE FORMING CANDLE for real-time indicators
-        # This makes RSI/ADX/MACD update every second!
-        import pytz
+        ist = now_ist()
+        b_s = ist.replace(minute=ist.minute - ist.minute % 15, second=0, microsecond=0)
         
-        ist = pytz.timezone("Asia/Kolkata")
-        current_time = now_ist()
-        
-        # ALIGN TO 15-MINUTE BAR START (Standardizes indicator calculation)
-        bar_start = current_time.replace(minute=current_time.minute - current_time.minute % 15, second=0, microsecond=0)
-        
-        if current_spot > 0:
-            # CHECK FOR DOUBLE COUNTING: If bar_start already exists in intraday_df, update it.
-            # This happens when yfinance/broker already provided the current candle.
-            if bar_start in intraday_df.index:
-                intraday_df_live = intraday_df.copy()
-                intraday_df_live.loc[bar_start, 'close'] = current_spot
-                intraday_df_live.loc[bar_start, 'high'] = max(intraday_df_live.loc[bar_start, 'high'], current_spot)
-                intraday_df_live.loc[bar_start, 'low'] = min(intraday_df_live.loc[bar_start, 'low'], current_spot)
-                # Note: keeping original open to avoid skewing
-            else:
-                # Use current spot price as close, last candle's close as open
-                last_close = intraday_df.iloc[-1]['close']
-                
-                # Build live candle
-                live_candle = pd.DataFrame({
-                    'open': [last_close],
-                    'high': [max(last_close, current_spot)],
-                    'low': [min(last_close, current_spot)],
-                    'close': [current_spot]
-                }, index=[bar_start])
-                
-                # Append live candle to historical data
-                intraday_df_live = pd.concat([intraday_df, live_candle])
-                
-            # HARDCODED STABILITY CHECK: Final Gap Verification
-            # Even after calibration, ensure the 'forming' candle doesn't have a massive leap 
-            # from the 'last known' historical close (which would skew the indicators like RSI).
-            last_hist_close = intraday_df.iloc[-1]['close']
-            gap_pct = abs(current_spot - last_hist_close) / last_hist_close * 100
-            
-            # [RELAXED DURING OPEN] Allow larger gaps (up to 3%) during the first 15 mins (Monday Gaps)
-            current_time_ist = now_ist().time()
-            stability_threshold = config.data_stability_threshold_pct
-            market_open_buffer_end = datetime.strptime("09:30:00", "%H:%M:%S").time()
-            
-            if current_time_ist < market_open_buffer_end:
-                stability_threshold = max(3.0, stability_threshold)
-            
-            is_stable = is_calibrated
-            if gap_pct > stability_threshold:
-                logger.critical(f"DATA INSTABILITY for {symbol}: Gap {gap_pct:.4f}% exceeds {stability_threshold}% threshold!")
-                is_stable = False
-            else:
-                if gap_pct > config.data_stability_threshold_pct:
-                    logger.info(f"DATA STABILITY: {symbol} Gap {gap_pct:.4f}% accepted under Market Open Buffer.")
-                
+        if b_s not in i_df.index:
+            last_close = i_df.iloc[-1]['close']
+            new_bar = pd.DataFrame([{
+                'open': last_close, 'high': max(last_close, spot), 
+                'low': min(last_close, spot), 'close': spot
+            }], index=[b_s])
+            i_df = pd.concat([i_df, new_bar])
         else:
-            intraday_df_live = intraday_df
-            is_stable = is_calibrated
-            if current_spot == 0:
-                current_spot = intraday_df.iloc[-1]['close']
-        
-        # Calculate intraday indicators WITH LIVE CANDLE - updates in real-time!
-        intraday_df_live['MACD'], intraday_df_live['MACD_Signal'], intraday_df_live['MACD_Hist'] = \
-            TechnicalIndicators.calculate_macd(intraday_df_live['close'])
-        intraday_df_live['RSI'] = TechnicalIndicators.calculate_rsi(intraday_df_live['close'])
-        intraday_df_live['ADX'], intraday_df_live['+DI'], intraday_df_live['-DI'] = \
-            TechnicalIndicators.calculate_adx(intraday_df_live['high'], intraday_df_live['low'], intraday_df_live['close'])
-        
-        # Fetch VIX with robust fallback
-        try:
-            vix_quote = api.get_quote("INDIA VIX", "NSE")
-            current_vix = vix_quote.get('last_price', 15.0) if vix_quote else 15.0
-        except Exception as e:
-            logger.warning(f"Failed to fetch India VIX: {e}. Using default 15.0")
-            current_vix = 15.0
-            
-        if current_vix <= 0:
-            current_vix = 15.0
-        
-        return daily_df, intraday_df_live, current_spot, current_vix, is_stable
+            i_df.loc[b_s, 'close'] = spot
+            i_df.loc[b_s, 'high'] = max(i_df.loc[b_s, 'high'], spot)
+            i_df.loc[b_s, 'low'] = min(i_df.loc[b_s, 'low'], spot)
+
+        i_df['MACD'], i_df['MACD_Signal'], i_df['MACD_Hist'] = TechnicalIndicators.calculate_macd(i_df['close'])
+        i_df['RSI'] = TechnicalIndicators.calculate_rsi(i_df['close'])
+        i_df['ADX'], i_df['+DI'], i_df['-DI'] = TechnicalIndicators.calculate_adx(i_df['high'], i_df['low'], i_df['close'])
+
+        is_fresh = api.last_fetch_freshness.get(symbol, False)
+        return d_df, i_df, spot, 15.0, stable, is_fresh
     except Exception as e:
-        logger.error(f"Error fetching market data: {e}")
-        return None, None, None, None, False
+        logger.error(f"Data Fetch Error ({symbol}): {e}")
+        return None, None, None, None, False, False
 
-
-def exit_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: OrderManager, symbols_config: dict):
-    """
-    REAL-TIME EXIT MONITORING
-    Runs every 1 second to check SL and Profit targets
-    """
-    logger.info("EXIT MONITORING THREAD STARTED (1-second checks)")
-    
-    # Track consecutive bad ticks for safety exits
-    safety_counts = {} # {position_id: count}
-    
-    # Periodic Sync Timer
-    last_sync_time = time.time()
-    sync_interval = 300 # 5 minutes
+def exit_monitoring_loop(api, bot, order_manager, symbols_config):
+    logger.info("EXIT MONITORING THREAD STARTED (Turbo 200ms)")
+    last_sync = time.time()
     
     while not shutdown_event.is_set():
+        t0 = time.time()
         try:
-            # Check if market closed
-            current_time_dt = now_ist().time() # Use a different variable name to avoid conflict with time.time()
-            if current_time_dt > config.market_close:
-                logger.info("EXIT THREAD: Market closed")
-                break
-            
-            # PERIODIC BROKER SYNC (Every 5 minutes)
-            # This picks up manual trades or recovers from transient 500 errors
-            current_time_ts = time.time() # Timestamp for sync interval
-            # logger.debug(f"Sync Timer: {current_time_ts - last_sync_time:.1f}s / {sync_interval}s")
-            if current_time_ts - last_sync_time >= sync_interval:
-                logger.info("!!! TRIGGERING PERIODIC POSITIONS SYNC !!!")
+            if now_ist().time() > config.market_close: break
+            if time.time() - last_sync > 300:
                 sync_positions_from_broker(bot, api)
-                last_sync_time = current_time_ts
+                last_sync = time.time()
 
-            # Check each active position
             with bot.lock:
-                underlyings = list(bot.positions.keys())
-                
-            for underlying in underlyings:
+                # Standardize current position keys to prevent Zombie Mode
+                active_raw = list(bot.positions.keys())
+                active = []
+                for u in active_raw:
+                    from src.utils import normalize_symbol
+                    norm = normalize_symbol(u)
+                    if norm != u:
+                        logger.info(f"NORMALIZING ACTIVE POSITION KEY: {u} -> {norm}")
+                        bot.positions[norm] = bot.positions.pop(u)
+                    active.append(norm)
+            
+            if not active:
+                time.sleep(1.0); continue
+
+            # Parallel quote fetch (Spot + Options)
+            f_list = []
+            for u in active:
                 with bot.lock:
-                    if underlying not in bot.positions:
-                        continue
-                    position = bot.positions[underlying]
-                
-                # Get symbol info from config (reverse lookup or use position's underlying)
-                symbol_info = None
-                for sym_name, info in symbols_config.items():
-                    if info[2] == underlying:
-                        symbol_info = (sym_name, info[0], info[1])
-                        break
-                
-                if not symbol_info:
-                    # Fallback for imported positions
-                    symbol_map = {
-                        "NIFTY50": "NIFTY 50",
-                        "BANKNIFTY": "NIFTY BANK",
-                        "NIFTYBANK": "NIFTY BANK",
-                        "FINNIFTY": "NIFTY FIN SERVICE",
-                        "NIFTYFINSERVICE": "NIFTY FIN SERVICE",
-                        "SENSEX": "SENSEX"
-                    }
-                    symbol = symbol_map.get(underlying, underlying)
-                    exchange, instrument_token = symbols_config.get(symbol, ("NSE", "", underlying))[:2]
-                else:
-                    symbol, exchange, instrument_token = symbol_info
-                
-                # Get current spot price (FAST - just spot price)
-                quote = api.get_quote(symbol, exchange)
-                if not quote:
-                    continue
+                    pos = bot.positions.get(u)
+                    if not pos: continue
+                    f_list.append((u, symbols_config[u][0])) # (Symbol, Exchange)
+                    if pos.option_symbol:
+                        f_list.append((pos.option_symbol, "BFO" if "SENSEX" in u else "NFO"))
+
+            qs = api.get_quotes_parallel(f_list)
+            
+            # Global P&L for Win-Lock
+            total_unrealized = sum(p.calculate_pnl(qs.get(p.option_symbol,{}).get('last_price',0)) for p in bot.positions.values() if p.option_symbol)
+            bot.update_daily_peak(bot.daily_pnl + total_unrealized)
+            floor = bot.get_win_lock_floor()
+
+            for u in active:
+                try:
+                    with bot.lock:
+                        pos = bot.positions.get(u)
+                        if not pos: continue
                     
-                current_spot = quote.get('last_price', 0)
-                if current_spot == 0:
-                    continue
-                
-                # CRITICAL: We need the OPTION PREMIUM to check Safety Net
-                current_premium = 0.0
-                if position.option_symbol:
-                    # Determine correct exchange: BFO for SENSEX, NFO for others
-                    opt_exchange = "BFO" if underlying == "SENSEX" else "NFO"
-                    opt_quote = api.get_quote(position.option_symbol, opt_exchange)
-                    if opt_quote:
-                        current_premium = opt_quote.get('last_price', 0.0)
-                
-                # LOGGING: Added tracking logs for visibility
-                if current_premium > 0:
-                     pnl = position.calculate_pnl(current_premium)
-                     logger.info(f"MONITORING {underlying}: Spot={current_spot:.2f}, LTP={current_premium:.2f}, P&L=Rs {pnl:.2f}")
-                else:
-                     logger.warning(f"MONITORING {underlying}: Blind (Failed to fetch quote for {position.option_symbol})")
-                     # REMOVED DANGEROUS FALLBACK - current_premium stays 0.0
-                
-                # SIMPLIFIED EXIT CHECK FOR MAIN LOOP (Safety + SL + TP):
-                if current_premium > 0:
-                    # 1. Safety Net (Max Loss)
-                    pnl_pct = position.calculate_pnl_pct(current_premium)
-                    max_loss = config.max_premium_loss_percent
+                    spot = qs.get(u, {}).get('last_price', 0)
+                    opt = qs.get(pos.option_symbol, {}).get('last_price', 0) if pos.option_symbol else 0
+                    if spot <= 0 or opt <= 0: continue
                     
-                    exit_reason = None
-                    
-                    pos_id = position.position_id
-                    if pnl_pct <= max_loss:
-                        safety_counts[pos_id] = safety_counts.get(pos_id, 0) + 1
-                        logger.warning(f"SAFETY CHECK {underlying}: Premium P&L ({pnl_pct:.2f}%) <= {max_loss}% (Count: {safety_counts[pos_id]}/3)")
-                        
-                        if safety_counts[pos_id] >= 3:
-                            logger.error(f"!!! SAFETY EXIT TRIGGERED !!!: -50% loss confirmed for 3 ticks")
-                            exit_reason = ExitReason.STOP_LOSS
+                    reason = None
+                    if floor > 0 and (bot.daily_pnl + total_unrealized) <= floor:
+                        reason = ExitReason.DAILY_WIN_LOCK
                     else:
-                        if pos_id in safety_counts:
-                            logger.info(f"SAFETY RESET {underlying}: Premium recovered to {pnl_pct:.2f}%")
-                            del safety_counts[pos_id]
-                    
-                        # 2. Stop Loss (Spot based)
-                        if position.check_sl_hit(current_spot):
-                            logger.warning(f"EXIT THREAD: STOP LOSS HIT for {underlying}")
-                            exit_reason = ExitReason.STOP_LOSS
-                            
-                        # 3. Profit Target (HARDCODED: Rs 350.0)
-                        elif position.check_profit_hit(current_premium, config.profit_target_amount):
-                            logger.info(f"EXIT THREAD: PROFIT TARGET HIT for {underlying}")
-                            exit_reason = ExitReason.PROFIT_TARGET
-                
-                # EXECUTE EXIT
-                if exit_reason:
-                    logger.info(f"LIVE MODE: Placing EXIT order for {position.position_id} | Reason: {exit_reason}")
-                    
-                    if config.live_trading:
-                        exit_symbol = position.option_symbol
-                        if exit_symbol:
-                            # Exchange logic: SENSEX options are on BFO, others NFO? 
-                            # MStock usually NFO for NSE, BFO for BSE.
-                            # position.option_symbol should be correct from sync.
-                            
-                            # Determine exchange based on underlying or symbol
-                            exit_exchange = "BFO" if "SENSEX" in underlying else "NFO" 
-                            
+                        reason = bot.check_exit_conditions(pos, opt, spot, 0, None)
+
+                    if reason:
+                        logger.warning(f"[TURBO EXIT] {u} ({reason})")
+                        if config.live_trading:
+                            order_managers_ex = "BFO" if "SENSEX" in u else "NFO"
                             order_manager.place_order(
-                                api=api,
-                                symbol=exit_symbol,
-                                underlying=underlying,
-                                strike=position.strike_price,
-                                option_type=position.trade_type.value,
-                                qty=position.lot_size,
-                                side='SELL',
-                                exchange=exit_exchange
+                                api=api, 
+                                symbol=pos.option_symbol, 
+                                underlying=u, 
+                                strike=pos.strike_price, 
+                                option_type=pos.trade_type.value, # Corrected from p.option_type
+                                qty=pos.lot_size, # Corrected from p.qty
+                                side='SELL', 
+                                exchange=order_managers_ex
                             )
-                        else:
-                            logger.error(f"Cannot exit {underlying}: Missing option_symbol")
-
-                    bot.exit_trade(underlying, current_premium, current_spot, exit_reason)
-                    
-                    if config.live_trading:
-                        # Give the broker a moment to process the fill
-                        time.sleep(2)
-                        bot.sync_daily_pnl(api)
+                        bot.exit_trade(u, opt, spot, reason, api=api)
+                except Exception as inner_e:
+                    logger.error(f"Error monitoring {u}: {inner_e}")
                     continue
-            
-            # Sleep 1 second before next check
-            time.sleep(1)
-            
+
+            dt = time.time() - t0
+            time.sleep(max(0.01, 0.2 - dt))
         except Exception as e:
-            logger.error(f"EXIT THREAD ERROR: {e}")
-            time.sleep(1)
-    
-    logger.info("EXIT MONITORING THREAD STOPPED")
+            logger.error(f"EXIT THREAD ERROR: {e}"); time.sleep(1)
 
-
-def entry_monitoring_loop(api: MStockAPI, bot: FnOTradingBot, order_manager: OrderManager, symbols_config: dict):
-    """
-    ENTRY MONITORING (1-second real-time checks)
-    Checks entry conditions and MACD reversals continuously
-    """
-    logger.info("ENTRY MONITORING THREAD STARTED (1-second real-time checks)")
-    
-    iteration = 0
+def entry_monitoring_loop(api, bot, order_manager, symbols_config):
+    from src.utils import normalize_symbol
+    logger.info("ENTRY MONITORING THREAD STARTED (Turbo 200ms)")
+    cache = {} 
+    last_hb = -1
     
     while not shutdown_event.is_set():
+        t0 = time.time()
         try:
-            # Check if market closed
-            current_time = now_ist().time()
-            if current_time > config.market_close:
-                logger.info("ENTRY THREAD: Market closed")
+            now = now_ist()
+            if now.time() > config.market_close: break
+            
+            # Send Visual Heartbeat (Rule 9: 10:30, 12:30, 14:30)
+            heartbeat_hours = {10, 12, 14}
+            if now.hour in heartbeat_hours and now.minute == 30 and now.hour != last_hb:
+                try:
+                    vix_quote = api.get_quote("INDIA VIX", "NSE")
+                    vix_val = vix_quote.get('last_price', 15.0) if vix_quote else 15.0
+                    notify_heartbeat("RUNNING", "Turbo Monitoring Active (200ms).", vix_val, bot.daily_trades)
+                    last_hb = now.hour
+                except: pass
+
+            # 1. Fetch data for all symbols
+            s_list = [(v[2], v[0]) for v in symbols_config.values()]
+            all_qs = api.get_quotes_parallel(s_list)
+            vix_quote = api.get_quote("INDIA VIX", "NSE")
+            vix = vix_quote.get('last_price', 15.0) if vix_quote else 15.0
+
+            # [DATA_GUARD] Heartbeat Logging for Scavenger (Every 30s)
+            static_timer = getattr(entry_monitoring_loop, "last_dg", 0)
+            if time.time() - static_timer > 30:
+                for u, (exch, token, broker_sym) in symbols_config.items():
+                    spot = all_qs.get(broker_sym, {}).get('last_price', 0)
+                    if spot > 0:
+                        logger.info(f"[DATA_GUARD] {broker_sym} | PRICE: {spot:.2f} | TIME: {now.strftime('%H:%M:%S')}")
+                entry_monitoring_loop.last_dg = time.time()
+
+            for u, (exch, token, broker_sym) in symbols_config.items():
+                try:
+                    name = u # Internal Key (NIFTY, BANKNIFTY)
+                    spot = all_qs.get(broker_sym, {}).get('last_price', 0)
+                    
+                    # [STABILITY GUARD] Reject invalid or extreme "Zero-Value" spikes
+                    if spot <= 0: continue
+                    
+                    # Prevent wild spikes (e.g. from 24000 to 0 or 500000)
+                    prev_close = 0 # To be fetched from cache below
+                
+                    # Check cache
+                    state = cache.get(u)
+                    if not state or (time.time() - state['t']) > 300:
+                        d, i, _, _, ok, fresh = get_market_data_with_indicators(api, broker_sym, exch, token)
+                        if d is not None:
+                            cache[u] = {'d': d, 'i': i, 't': time.time(), 'ok': ok, 'fresh': fresh}
+                    else:
+                        d, i, ok, fresh = state['d'], state['i'], state['ok'], state.get('fresh', True)
+                        # [FIX] Set 'stable' and 'spot' if not in cache (standardizing variables)
+                        stable = ok
+                        
+                        # [STABILITY GUARD] Validate spot against last bar
+                        if not i.empty:
+                            prev_c = i.iloc[-1]['close']
+                            # If spot deviates by > 20% from last 15m closed price, it's likely bad data
+                            if prev_c > 0 and abs(spot - prev_c) > (prev_c * 0.20):
+                                logger.warning(f"[DATA GUARD] {u} rejected suspicious spot: {spot} (Prev 15m Close: {prev_c})")
+                                continue
+                        
+                        b_s = now_ist().replace(minute=now_ist().minute - now_ist().minute % 15, second=0, microsecond=0)
+                        if b_s not in i.index:
+                            # Leading Edge Synthesis: Connect Friday's close to today's open
+                            last_close = i.iloc[-1]['close']
+                            new_bar = pd.DataFrame([{
+                                'open': last_close, 'high': max(last_close, spot), 
+                                'low': min(last_close, spot), 'close': spot
+                            }], index=[b_s])
+                            i = pd.concat([i, new_bar])
+                        else:
+                            i.loc[b_s, 'close'] = spot
+                            i.loc[b_s, 'high'] = max(i.loc[b_s, 'high'], spot)
+                            i.loc[b_s, 'low'] = min(i.loc[b_s, 'low'], spot)
+                            
+                        # Complete indicator recalculation for accuracy (RSI/MACD strictly on 15m)
+                        i['MACD'], i['MACD_Signal'], i['MACD_Hist'] = TechnicalIndicators.calculate_macd(i['close'])
+                        i['RSI'] = TechnicalIndicators.calculate_rsi(i['close'])
+                        i['ADX'], i['+DI'], i['-DI'] = TechnicalIndicators.calculate_adx(i['high'], i['low'], i['close'])
+                        
+                    if d is None or i is None: continue
+                    idx = len(i) - 1
+                    
+                    # Reversal Check
+                    if name in bot.positions:
+                       underlying = name
+                       if underlying in symbols_config:
+                           exch, _, broker_sym = symbols_config[underlying]
+                       else:
+                           norm_u = normalize_symbol(underlying)
+                           if norm_u in symbols_config:
+                               exch, _, broker_sym = symbols_config[norm_u]
+                           else: continue
+                        
+                       p = bot.positions[underlying]
+                       quote = api.get_quote(broker_sym, exch)
+                       if bot.check_exit_conditions(p, p.entry_price, spot, idx, i) == ExitReason.MACD_REVERSAL:
+                           logger.info(f"[TURBO MACD EXIT] {name}")
+                           ex = "BFO" if "SENSEX" in name else "NFO"
+                           pr = api.get_quote(p.option_symbol, ex).get('last_price', 0)
+                           if config.live_trading: 
+                               order_manager.place_order(
+                                   api=api, 
+                                   symbol=p.option_symbol, 
+                                   underlying=name, 
+                                   strike=p.strike_price, 
+                                   option_type=p.trade_type.value, 
+                                   qty=p.lot_size, 
+                                   side='SELL', 
+                                   exchange=ex
+                               )
+                           bot.exit_trade(name, pr, spot, ExitReason.MACD_REVERSAL, api=api)
+                    
+                    # Entry Check
+                    elif name not in bot.positions:
+                        tt = None
+                        if bot.check_entry_conditions_ce(name, d, i, idx, vix, ok, spot, fresh): tt = TradeType.CE
+                        elif bot.check_entry_conditions_pe(name, d, i, idx, vix, ok, spot, fresh): tt = TradeType.PE
+                        
+                        if tt:
+                            strk, osym = OptionSelector.select_option(name, spot, tt.value, depth=config.strike_depth)
+                            ex = "BFO" if "SENSEX" in name else "NFO"
+                            pr = api.get_quote(osym, ex).get('last_price', 0) or (spot * 0.015)
+                            
+                            if config.live_trading:
+                                norm_name = normalize_symbol(name)
+                                qty = config.get_lot_size(norm_name)
+                                r = order_manager.place_order(
+                                    api=api, symbol=osym, underlying=name, strike=strk, 
+                                    option_type=tt.value, qty=qty, side='BUY', 
+                                    token=SymbolMaster().get_token(osym), exchange=ex
+                                )
+                                if r and r.status.value == 'PLACED': 
+                                    bot.enter_trade(name, tt, pr, spot, vix, idx, option_symbol=osym, strike_price=strk)
+                            else:
+                                bot.enter_trade(name, tt, pr, spot, vix, idx, option_symbol=osym, strike_price=strk)
+                except Exception as inner_e:
+                    logger.error(f"Error processing {u} in entry loop: {inner_e}")
+                    continue
+
+            dt = time.time() - t0
+            time.sleep(max(0.01, 0.2 - dt))
+        except Exception as e:
+            logger.error(f"ENTRY THREAD ERROR: {e}"); time.sleep(1)
+
+def background_sync_loop(api, bot):
+    """
+    Independent thread for:
+    1. 'Ground Truth' realized P&L sync from broker (Every 5 mins)
+    2. 'Live Status' Telegram heartbeats (Every 60 secs when trade active)
+    """
+    logger.info("BACKGROUND SYNC & STATUS THREAD STARTED")
+    last_heavy_sync = 0
+    
+    while not shutdown_event.is_set():
+        current_time = time.time()
+        
+        try:
+            # 1. HEAVY SYNC (Every 5 minutes)
+            if current_time - last_heavy_sync >= 300:
+                bot.sync_daily_pnl(api)
+                last_heavy_sync = current_time
+            
+            # 2. LIVE STATUS HEARTBEAT (Every 60 seconds if active trade)
+            if bot.positions:
+                active_pnl = 0.0
+                for pos in bot.positions.values():
+                    # We use the internal monitor price if available
+                    active_pnl += getattr(pos, 'last_pnl', 0.0)
+                
+                from src.notifications import notify_live_status
+                notify_live_status(
+                    active_trade_pnl=active_pnl,
+                    daily_pnl=bot.daily_pnl,
+                    floor=bot.get_win_lock_floor(),
+                    peak=bot.daily_max_pnl
+                )
+        except Exception as e:
+            logger.error(f"BACKGROUND SYNC ERROR: {e}")
+        
+        # Interval check (60 seconds)
+        for _ in range(60):
+            if shutdown_event.is_set(): break
+            time.sleep(1)
+
+def run_live_trading():
+    """Main execution loop for the trading bot"""
+    from src.notifications import notify_system_status
+    try:
+        api = MStockAPI(); 
+        if not api.ensure_session_is_valid(): return
+        
+        # [NEW] PRE-FLIGHT SYSTEM CHECK (Rule-Aligned)
+        if not api.validate_connection():
+            logger.critical("Pre-Flight Check Failed. Aborting startup for safety.")
+            notify_system_status(False, "Startup Failed: Pre-Flight Check (Indices Offline)")
+            return
+        
+        # Send ONLINE notification immediately upon successful connection
+        notify_system_status(is_online=True)
+        
+        bot = FnOTradingBot(config, api=api); order_manager = OrderManager(config)
+        
+        # [MANDATORY] Capital Sync (Rule 15)
+        try:
+            live_funds = api.get_funds()
+            if live_funds and live_funds > 0:
+                bot.sync_starting_capital(live_funds)
+            else:
+                logger.warning("Could not sync live funds. Using config default.")
+        except Exception as e:
+            logger.error(f"Capital Sync Error: {e}")
+        
+        # Structure: {InternalKey: (Exchange, Token, BrokerSymbol)}
+        symbols_config = {
+            "NIFTY": ("NSE", "26000", "NIFTY"),
+            "BANKNIFTY": ("NSE", "26009", "NIFTY BANK"), # Hardcoded to token 26009 for stability
+            "SENSEX": ("BSE", "51", "SENSEX")
+        }
+        
+        wait_for_market_open()
+        sync_positions_from_broker(bot, api)
+        
+        ex_t = threading.Thread(target=exit_monitoring_loop, args=(api, bot, order_manager, symbols_config), name="ExitT", daemon=True)
+        en_t = threading.Thread(target=entry_monitoring_loop, args=(api, bot, order_manager, symbols_config), name="EntryT", daemon=True)
+        bg_t = threading.Thread(target=background_sync_loop, args=(api, bot), name="SyncT", daemon=True)
+        
+        ex_t.start(); en_t.start(); bg_t.start()
+        
+        while not shutdown_event.is_set():
+            if now_ist().time() > config.market_close: 
+                shutdown_event.set()
                 break
             
-            # Check if within order placement window (9:15 AM - 3:25 PM)
-            from datetime import time as dtime
-            order_start = dtime(9, 15)  # 9:15 AM
+            # [ANTI-ZOMBIE] Master Watchdog for Background Threads
+            # Ensuring no core monitoring logic has crashed silently
+            dead_threads = []
+            if not ex_t.is_alive(): dead_threads.append("Exit-Monitor")
+            if not en_t.is_alive(): dead_threads.append("Entry-Scanner")
+            if not bg_t.is_alive(): dead_threads.append("Sync-Heartbeat")
             
-            iteration += 1
-            logger.info(f"\n{'='*60}")
-            logger.info(f"ENTRY CHECK #{iteration} | Time: {now_ist().strftime('%H:%M:%S')}")
-            logger.info(f"{'='*60}")
-            
-            # Process each symbol
-            for symbol, (exchange, instrument_token, underlying) in symbols_config.items():
+            if dead_threads:
+                reason = f"CRITICAL: Zombie State Detected! Dead threads: {', '.join(dead_threads)}"
+                logger.critical(reason)
+                notify_system_status(is_online=False, reason=reason)
+                shutdown_event.set() # Safe termination of remaining threads
+                break
                 
-                logger.info(f"\nProcessing {underlying}...")
-                
-                # Get market data with indicators (Unpack is_stable flag)
-                daily_df, intraday_df, current_spot, current_vix, is_stable = get_market_data_with_indicators(
-                    api, symbol, exchange, instrument_token
-                )
-                
-                if daily_df is None or intraday_df is None:
-                    logger.warning(f"Skipping {underlying} due to data issues")
-                    continue
-                
-                if not is_stable:
-                    logger.warning(f"[DATA STABILITY BLOCK] Skipping entry analysis for {underlying} due to unstable data.")
-                
-                current_row_idx = len(intraday_df) - 1
-                logger.info(f"  Spot: Rs {current_spot:,.2f} | VIX: {current_vix:.2f}")
-                
-                
-                # Check MACD reversal for active positions (needs new 15-min candle)
-                if underlying in bot.positions:
-                    position = bot.positions[underlying]
-                    # Try to fetch actual option premium for accuracy
-                    current_premium = 0.0
-                    if position.option_symbol:
-                        opt_exchange = "BFO" if underlying == "SENSEX" else "NFO"
-                        opt_quote = api.get_quote(position.option_symbol, opt_exchange)
-                        if opt_quote:
-                            current_premium = opt_quote.get('last_price', 0.0)
-                    
-                    if current_premium == 0:
-                        logger.warning(f"MACD CHECK {underlying}: Blind (Failed to fetch quote for {position.option_symbol})")
-                        
-                    current_profit_pct = position.calculate_pnl_pct(current_premium)
-                    current_pnl = position.calculate_pnl(current_premium)
-                    
-                    # Only check reversal if profit < target amount (HARDCODED: 350.0)
-                    if current_pnl < config.profit_target_amount:
-                        # Check for MACD reversal on CONFIRMED CANDLE ONLY
-                        check_idx = current_row_idx - 1
-                        
-                        with bot.lock:
-                            # Re-verify position still exists within lock
-                            if underlying not in bot.positions:
-                                continue
-                            position = bot.positions[underlying]
-                            
-                        if position.trade_type == TradeType.CE:
-                            # CALL REVERSAL: MACD Bearish OR DI Bearish (+DI < -DI)
-                            macd_rev = (check_idx > 0 and TechnicalIndicators.check_macd_crossover_bearish(
-                                intraday_df['MACD'],
-                                intraday_df['MACD_Signal'],
-                                check_idx
-                            ))
-                            di_rev = (check_idx > 0 and TechnicalIndicators.check_di_crossover_bearish(
-                                intraday_df['+DI'],
-                                intraday_df['-DI'],
-                                check_idx
-                            ))
-
-                            if macd_rev or di_rev:
-                                reason = "MACD" if macd_rev else "DI"
-                                logger.info(f"ENTRY THREAD: {reason} REVERSAL (Confirmed) for {underlying}")
-                                
-                                if config.live_trading:
-                                    logger.info(f"LIVE MODE: Placing SELL order ({reason}) for {position.position_id}")
-                                    
-                                    exit_symbol = position.option_symbol
-                                    if exit_symbol:
-                                        exit_exchange = "BFO" if underlying == "SENSEX" else "NFO"
-                                        order_manager.place_order(
-                                            api=api,
-                                            symbol=exit_symbol,
-                                            underlying=underlying,
-                                            strike=position.strike_price,
-                                            option_type=position.trade_type.value,
-                                            qty=position.lot_size,
-                                            side='SELL',
-                                            exchange=exit_exchange
-                                        )
-                                
-                                bot.exit_trade(underlying, current_premium, current_spot, ExitReason.MACD_REVERSAL)
-                        else:  # PE
-                            # PUT REVERSAL: MACD Bullish OR DI Bullish (+DI > -DI)
-                            macd_rev = (check_idx > 0 and TechnicalIndicators.check_macd_crossover_bullish(
-                                intraday_df['MACD'],
-                                intraday_df['MACD_Signal'],
-                                check_idx
-                            ))
-                            di_rev = (check_idx > 0 and TechnicalIndicators.check_di_crossover_bullish(
-                                intraday_df['+DI'],
-                                intraday_df['-DI'],
-                                check_idx
-                            ))
-                            
-                            if macd_rev or di_rev:
-                                reason = "MACD" if macd_rev else "DI"
-                                logger.info(f"ENTRY THREAD: {reason} REVERSAL (Confirmed) for {underlying}")
-                                
-                                if config.live_trading:
-                                    logger.info(f"LIVE MODE: Placing SELL order ({reason}) for {position.position_id}")
-                                    
-                                    exit_symbol = position.option_symbol
-                                    if exit_symbol:
-                                        exit_exchange = "BFO" if underlying == "SENSEX" else "NFO"
-                                        order_manager.place_order(
-                                            api=api,
-                                            symbol=exit_symbol,
-                                            underlying=underlying,
-                                            strike=position.strike_price,
-                                            option_type=position.trade_type.value,
-                                            qty=position.lot_size,
-                                            side='SELL',
-                                            exchange=exit_exchange
-                                        )
-                                
-                                bot.exit_trade(underlying, current_premium, current_spot, ExitReason.MACD_REVERSAL)
-                
-                # Check entry conditions (only if no position)
-                if underlying not in bot.positions:
-                    trade_type = None
-                    
-                    # Check CE entry
-                    if bot.check_entry_conditions_ce(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable, current_spot):
-                        logger.info(f"Entry signal detected for {underlying} CE")
-                        trade_type = TradeType.CE
-                    
-                    # Check PE entry
-                    elif bot.check_entry_conditions_pe(underlying, daily_df, intraday_df, current_row_idx, current_vix, is_stable, current_spot):
-                        logger.info(f"Entry signal detected for {underlying} PE")
-                        trade_type = TradeType.PE
-                    
-                    if trade_type:
-                        # Select option contract
-                        strike, option_symbol = OptionSelector.select_option(
-                            underlying, 
-                            current_spot, 
-                            trade_type.value,
-                            depth=config.strike_depth
-                        )
-                        logger.info(f"  Selected option: {option_symbol}")
-                        
-                        # Get option premium (initial estimate for logging entry)
-                        current_premium = 0.0
-                        opt_exchange = "BFO" if underlying == "SENSEX" else "NFO"
-                        opt_quote = api.get_quote(option_symbol, opt_exchange)
-                        if opt_quote:
-                            current_premium = opt_quote.get('last_price', 0.0)
-                        
-                        if current_premium == 0:
-                             current_premium = current_spot * 0.015 # Safe only for initial logging estimate
-                        
-                        # Get instrument token for the symbol
-                        token = SymbolMaster().get_token(option_symbol)
-                        if not token:
-                            logger.warning(f"Token not found for {option_symbol}")
-                            token = "" # Try anyway? Or fail? Better try with empty.
-                        
-                        # Determine exchange: BFO for SENSEX, NFO for others
-                        exchange = "BFO" if underlying == "SENSEX" else "NFO"
-
-                        if config.live_trading:
-                            # Place LIVE order
-                            logger.info(f"LIVE MODE: Placing BUY order for {option_symbol} (Token: {token}, Exchange: {exchange})")
-                            order_result = order_manager.place_order(
-                                api=api,
-                                symbol=option_symbol,
-                                underlying=underlying,
-                                strike=strike,
-                                option_type=trade_type.value,
-                                qty=config.get_lot_size(underlying) * config.default_num_lots,
-                                side='BUY',
-                                token=token,
-                                exchange=exchange
-                            )
-                            
-                            if order_result.status.value == 'PLACED':
-                                from src.utils import Colors
-                                logger.info(Colors.bold_green(f"[TRADE ENTERED] {underlying} {trade_type.value} @ Strike {strike}"))
-                                bot.enter_trade(
-                                    underlying, 
-                                    trade_type, 
-                                    current_premium, 
-                                    current_spot, 
-                                    current_vix, 
-                                    current_row_idx,
-                                    option_symbol=option_symbol,
-                                    strike_price=strike
-                                )
-                            else:
-                                logger.warning(f"Order REJECTED: {order_result.rejection_reason}")
-                        else:
-                            # Paper trading mode
-                            logger.info(f"PAPER MODE: Simulating BUY for {option_symbol}")
-                            bot.enter_trade(
-                                underlying, 
-                                trade_type, 
-                                current_premium, 
-                                current_spot, 
-                                current_vix, 
-                                current_row_idx,
-                                option_symbol=option_symbol,
-                                strike_price=strike
-                            )
-                    else:
-                        # No entry conditions met - the detailed reasons are already logged
-                        # by check_entry_conditions_ce/pe functions
-                        pass
-            
-            # Print current status and Sync P&L (only every 10 iterations to reduce log spam)
-            if iteration % 10 == 0:
-                if config.live_trading:
-                    bot.sync_daily_pnl(api) # Periodic reconciliation
-
-                summary = bot.get_account_summary()
-                logger.info(f"\nActive Positions: {summary['open_positions']}")
-                logger.info(f"Daily P&L: Rs {summary['daily_pnl']:+,.2f}")
-            
-            # Wait 1 second before next check
-            time.sleep(1)
-            
-        except Exception as e:
-            import traceback
-            logger.error(f"ENTRY THREAD ERROR: {e}")
-            logger.error(traceback.format_exc())
-            time.sleep(60)
-    
-    logger.info("ENTRY MONITORING THREAD STOPPED")
-
-
-def run_live_trading(symbols_config: dict):
-    """
-    Run LIVE trading with dual-speed monitoring
-    """
-    mode = "LIVE TRADING" if config.live_trading else "PAPER TRADING"
-    
-    # Print the "Top 1%" Futuristic UI Startup
-    print_holographic_banner()
-    
-    logger.info(f"[bold cyan]INITIALIZING {mode} SESSION...[/bold cyan]")
-    logger.info(f"Capital: [bold green]Rs {config.initial_capital:,.2f}[/bold green] | Mode: [bold yellow]{'LIVE' if config.live_trading else 'PAPER'}[/bold yellow]")
-    logger.info(f"Daily Loss Limit: [bold red]{config.daily_loss_limit_pct}%[/bold red]")
-    logger.info("[dim]--------------------------------------------------[/dim]")
-    logger.info("MONITORING STRATEGY:")
-    logger.info("  Entry Checks: Every 1 second (REAL-TIME)")
-    logger.info("  Exit Checks: Every 1 second (REAL-TIME)")
-    logger.info("="*60)
-    
-    # Initialize API, bot, and order manager
-    api = MStockAPI()
-    
-    # Ensure session is valid (Try remote OTP if 401)
-    if config.live_trading:
-        if not api.ensure_session_is_valid():
-            logger.error("!!! CRITICAL: Failed to establish valid broker session even after remote OTP attempt !!!")
-            logger.error("System will shut down in 10 seconds. Check credentials and OTP flow.")
             time.sleep(10)
-            return
-            
-    bot = FnOTradingBot(config)
-    order_manager = OrderManager()
-    
-    # Sync any existing positions from broker
-    logger.info("Checking for existing positions in broker account...")
-    synced_count = sync_positions_from_broker(bot, api)
-    if synced_count > 0:
-        logger.info(f"Imported {synced_count} existing position(s) for monitoring")
-    
-    # Wait for market to open
-    wait_for_market_open()
-    
-    # IMMEDIATE SYNC after market open (pick up positions as soon as API is ready)
-    logger.info("Market Open! Triggering immediate position sync...")
-    sync_positions_from_broker(bot, api)
-    
-    try:
-        # Start both monitoring threads
-        entry_thread = threading.Thread(
-            target=entry_monitoring_loop,
-            args=(api, bot, order_manager, symbols_config),
-            name="EntryMonitor"
-        )
-        
-        exit_thread = threading.Thread(
-            target=exit_monitoring_loop,
-            args=(api, bot, order_manager, symbols_config),
-            name="ExitMonitor"
-        )
-        
-        entry_thread.start()
-        exit_thread.start()
-        
-        logger.info("\nBoth monitoring threads started!")
-        logger.info("Press Ctrl+C to stop...\n")
-        
-        # Wait for threads
-        entry_thread.join()
-        exit_thread.join()
-        
-    except KeyboardInterrupt:
-        logger.info("\nShutdown signal received...")
-        shutdown_event.set()
-        
-    finally:
-        # Final summary
+    except IPMismatchError as e:
+        logger.critical(f"[FATAL] {e}")
+        import requests
         try:
-            logger.info("\n" + "="*60)
-            logger.info(f"{mode} SESSION COMPLETE")
-            logger.info("="*60)
-            bot.print_account_summary()
-            
-            # Save trades
-            suffix = "live" if config.live_trading else "paper"
-            output_file = f"logs/{suffix}_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            bot.save_trades_to_csv(output_file)
-        except Exception as e:
-            logger.error(f"Error during session shutdown/summary: {e}")
-
-
-def load_symbols_from_config():
-    """Load trading symbols from config.json"""
-    try:
-        with open('config.json', 'r') as f:
-            cfg = json.load(f)
+            curr_ip = requests.get("https://api.ipify.org", timeout=5).text
+        except:
+            curr_ip = "Unknown"
         
-        symbols = {}
-        if 'symbols' in cfg:
-            # New config format with symbols section
-            for symbol_name, symbol_data in cfg['symbols'].items():
-                if symbol_name == 'comment':
-                    continue
-                # Each symbol entry: (exchange, token, underlying_key)
-                symbols[symbol_name] = (
-                    symbol_data['exchange'], 
-                    symbol_data['token'],
-                    symbol_data.get('key', symbol_name.replace(" ", ""))
-                )
-        else:
-            # Fallback to old hard-coded format
-            logger.warning("Old config format detected, using hard-coded symbols")
-            symbols = {
-                "NIFTY 50": ("NSE", "26000", "NIFTY50"),
-                "NIFTY BANK": ("NSE", "26009", "BANKNIFTY")
-            }
-        
-        logger.info(f"Loaded {len(symbols)} symbols from config: {list(symbols.keys())}")
-        return symbols
-    except Exception as e:
-        logger.error(f"Error loading symbols from config: {e}")
-        # Fallback to default
-        return {
-            "NIFTY 50": ("NSE", "26000", "NIFTY50"),
-            "NIFTY BANK": ("NSE", "26009", "BANKNIFTY")
-        }
-
+        reason = f"IP Mismatch! Update mStock Portal with: {curr_ip}"
+        notify_system_status(is_online=False, reason=reason)
+        # We don't use sys.exit(1) inside a function that might be called elsewhere,
+        # but in run_live_trading it's mostly fine. 
+        # Actually, let's just re-raise or handle it in __main__.
+        raise e
+    except KeyboardInterrupt: shutdown_event.set()
+    finally:
+        shutdown_event.set()
+        # Ensure threads have time to clean up if joined
 
 if __name__ == "__main__":
-    # Load symbols from config file
-    symbols_config = load_symbols_from_config()
-    
-    # Run trading based on config
-    run_live_trading(symbols_config)
+    try:
+        run_live_trading()
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"FATAL SYSTEM ERROR: {error_msg}")
+        # Only notify if it's not a keyboard interrupt shutdown
+        if not isinstance(e, KeyboardInterrupt):
+            from src.notifications import notify_system_status
+            notify_system_status(is_online=False, reason=f"Fatal System Error: {error_msg}")
+        sys.exit(1)

@@ -17,6 +17,11 @@ Run the following command in your terminal:
 python src/pre_flight_audit.py
 ```
 **Wait for ALL CHECKS to return [PASS].** This scan proves that the "Safety Shield" (15-min rule) is active in the code.
+- **Check for [WARM-UP] logs**: If the bot says "Indicators Warming Up", wait a few minutes until it has 100 bars.
+- [ ] **Check Data Synthesis**: Verify logs do NOT show `NIFTY ENTRY BLOCKED: DATA BLIND SPOT`. If they do, wait for the `[FIX]` synthesis heartbeats to appear.
+- [ ] **Verify Indicator Warm-up**: Ensure RSI is roughly aligned with live charts (not stuck at Friday's close).
+- [ ] **Monitor Entry Conditions**: Confirm bot is scanning for Nifty, BNF, and Sensex.
+- **Check for [FIX] logged**: Verify that 1m-resampling or YFinance fallbacks correctly triggered to fix any "Stale" indicator readings.
 
 ### 4. Launch Sequence
 1. **Restart the Bot**: Close any old terminal windows. Run `python main.py`.

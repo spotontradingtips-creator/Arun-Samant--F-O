@@ -126,6 +126,30 @@ class SymbolMaster:
                 return exp
         return None
 
+    def get_monthly_expiry(self, underlying: str, min_date: Optional[datetime] = None) -> Optional[datetime]:
+        """Finds the monthly (last) expiry for the earliest valid month."""
+        if underlying not in self.expiries:
+            return None
+            
+        if min_date is None:
+            min_date = datetime.now().date()
+        else:
+            if isinstance(min_date, datetime):
+                min_date = min_date.date()
+
+        valid_expiries = [exp for exp in self.expiries[underlying] if exp >= min_date]
+        if not valid_expiries:
+            return None
+            
+        # Group by the first valid month we encounter
+        first_valid = valid_expiries[0]
+        target_year, target_month = first_valid.year, first_valid.month
+        
+        # Get all expiries for that specific month and return the last one (which is the monthly expiry)
+        monthlies = [exp for exp in valid_expiries if exp.year == target_year and exp.month == target_month]
+        return max(monthlies)
+
+
     def get_symbol(self, underlying: str, expiry: datetime, strike: float, option_type: str) -> Optional[str]:
         """Retrieves correct trading symbol from master data in mStock instrument file format."""
         if isinstance(expiry, datetime):
@@ -134,7 +158,7 @@ class SymbolMaster:
             expiry_date = expiry
         
         # Normalize underlying name (NIFTY50 -> NIFTY, etc.)
-        normalized_underlying = self._normalize_underlying(underlying)
+        normalized_underlying = self._normalize_underlying(underlying).replace(" ", "")
             
         try:
             # 1. Try master file lookup first
@@ -211,6 +235,8 @@ class SymbolMaster:
     def _normalize_underlying(self, underlying: str) -> str:
         """Map internal names to exchange symbol names"""
         mapping = {
+            "NIFTY 50": "NIFTY",
+            "NIFTY BANK": "BANKNIFTY",
             "NIFTY50": "NIFTY",
             "NIFTYBANK": "BANKNIFTY",
             "BANKNIFTY": "BANKNIFTY",

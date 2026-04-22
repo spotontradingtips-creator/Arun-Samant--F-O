@@ -167,7 +167,7 @@ def check_connection():
                         api = MStockAPI()
                         # Use a lightweight call to check validity
                         # Smart API handles prefix automatically
-                        quote = api.get_quote('NIFTY 50') 
+                        quote = api.get_quote('NIFTY') 
                         if quote: 
                             is_valid = True
                         else:
@@ -276,7 +276,7 @@ def get_live_indicators():
     except:
         # Fallback Mock Data with Enhanced Precision (Updated for Current Market Levels)
         return {
-            'NIFTY50': {'spot_price': 24500.00, 'daily': {'rsi': 54.32, 'adx': 32.15, 'macd_trend': 'Bullish'}, 'intraday_15m': {'rsi': 58.12, 'adx': 29.87, 'macd_trend': 'Bullish'}},
+            'NIFTY': {'spot_price': 24500.00, 'daily': {'rsi': 54.32, 'adx': 32.15, 'macd_trend': 'Bullish'}, 'intraday_15m': {'rsi': 58.12, 'adx': 29.87, 'macd_trend': 'Bullish'}},
             'BANKNIFTY': {'spot_price': 52100.00, 'daily': {'rsi': 48.76, 'adx': 28.45, 'macd_trend': 'Bearish'}, 'intraday_15m': {'rsi': 52.34, 'adx': 31.22, 'macd_trend': 'Bearish'}},
             'FINNIFTY': {'spot_price': 23200.00, 'daily': {'rsi': 51.23, 'adx': 27.56, 'macd_trend': 'Bullish'}, 'intraday_15m': {'rsi': 53.45, 'adx': 30.12, 'macd_trend': 'Bullish'}},
             'SENSEX': {'spot_price': 80500.00, 'daily': {'rsi': 52.34, 'adx': 29.87, 'macd_trend': 'Bullish'}, 'intraday_15m': {'rsi': 55.67, 'adx': 31.45, 'macd_trend': 'Bullish'}},
@@ -289,7 +289,7 @@ col1, col2 = st.columns([3, 1])
 
 with col1:
     # INDICES GRID
-    indices_to_show = ['NIFTY50', 'BANKNIFTY', 'FINNIFTY', 'SENSEX']
+    indices_to_show = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'SENSEX']
     cols = st.columns(len(indices_to_show))
     
     for i, index_name in enumerate(indices_to_show):
@@ -436,14 +436,14 @@ with col_cfg1:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("#### INDEX_RISK")
-        n_sl = st.number_input("NIFTY SL %", value=float(config.get('stop_loss', {}).get('NIFTY50', {}).get('base_sl_percent', 0.70)), step=0.05)
+        n_sl = st.number_input("NIFTY SL %", value=float(config.get('stop_loss', {}).get('NIFTY', {}).get('base_sl_percent', 0.70)), step=0.05)
         bn_sl = st.number_input("BANKNIFTY SL %", value=float(config.get('stop_loss', {}).get('BANKNIFTY', {}).get('base_sl_percent', 1.00)), step=0.05)
         fn_sl = st.number_input("FINNIFTY SL %", value=float(config.get('stop_loss', {}).get('FINNIFTY', {}).get('base_sl_percent', 0.80)), step=0.05)
         sx_sl = st.number_input("SENSEX SL %", value=float(config.get('stop_loss', {}).get('SENSEX', {}).get('base_sl_percent', 0.60)), step=0.05)
 
     with c2:
         st.markdown("#### QUANTITY_CONTROL")
-        n_lots = st.number_input("NIFTY LOTS", value=int(config.get('lot_sizes', {}).get('NIFTY50', {}).get('num_lots', 1)))
+        n_lots = st.number_input("NIFTY LOTS", value=int(config.get('lot_sizes', {}).get('NIFTY', {}).get('num_lots', 1)))
         bn_lots = st.number_input("BANKNIFTY LOTS", value=int(config.get('lot_sizes', {}).get('BANKNIFTY', {}).get('num_lots', 1)))
         fn_lots = st.number_input("FINNIFTY LOTS", value=int(config.get('lot_sizes', {}).get('FINNIFTY', {}).get('num_lots', 1)))
         sx_lots = st.number_input("SENSEX LOTS", value=int(config.get('lot_sizes', {}).get('SENSEX', {}).get('num_lots', 1)))
@@ -456,11 +456,14 @@ with col_cfg2:
     daily_loss = st.slider("DAILY LOSS CAP %", 1.0, 10.0, float(config.get('capital', {}).get('daily_loss_limit_percent', 3.0)), 0.5)
     
     if st.button("SYNCHRONIZE SETTINGS"):
-        config['stop_loss']['NIFTY50']['base_sl_percent'] = float(n_sl)
+        config['stop_loss']['NIFTY'] = config['stop_loss'].get('NIFTY', {})
+        config['stop_loss']['NIFTY']['base_sl_percent'] = float(n_sl)
         config['stop_loss']['BANKNIFTY']['base_sl_percent'] = float(bn_sl)
         config['stop_loss']['FINNIFTY']['base_sl_percent'] = float(fn_sl)
         config['stop_loss']['SENSEX']['base_sl_percent'] = float(sx_sl)
-        config['lot_sizes']['NIFTY50']['num_lots'] = int(n_lots)
+        
+        config['lot_sizes']['NIFTY'] = config['lot_sizes'].get('NIFTY', {})
+        config['lot_sizes']['NIFTY']['num_lots'] = int(n_lots)
         config['lot_sizes']['BANKNIFTY']['num_lots'] = int(bn_lots)
         config['lot_sizes']['FINNIFTY']['num_lots'] = int(fn_lots)
         config['lot_sizes']['SENSEX']['num_lots'] = int(sx_lots)

@@ -1,7 +1,7 @@
 import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, List
 from src.trading_models import Position, TradeType, ExitReason
 
@@ -11,6 +11,8 @@ class StateManager:
     """Manages persistence of trading state to disk"""
     
     FILE_PATH = "data/positions.json"
+    HISTORY_PATH = "data/daily_history.json"
+    DAILY_STATE_PATH = "data/daily_state.json"
     
     @staticmethod
     def _json_serial(obj):
@@ -151,3 +153,39 @@ class StateManager:
         except Exception as e:
             logger.error(f"Failed to load history: {e}")
             return []
+
+    @staticmethod
+    def _json_serial(obj):
+        """JSON serializer for objects not serializable by default json code"""
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        raise TypeError ("Type %s not serializable" % type(obj))
+
+    @staticmethod
+    def save_daily_state(state: Dict[str, Any]):
+        """Save daily tracking state (like Peak P&L) to JSON file"""
+        try:
+            os.makedirs("data", exist_ok=True)
+            
+            # Atomic save
+            tmp_path = StateManager.DAILY_STATE_PATH + ".tmp"
+            with open(tmp_path, 'w') as f:
+                json.dump(state, f, default=StateManager._json_serial, indent=4)
+            
+            os.replace(tmp_path, StateManager.DAILY_STATE_PATH)
+            logger.debug("Saved daily state to disk")
+            
+        except Exception as e:
+            logger.error(f"Failed to save daily state: {e}")
+
+    @staticmethod
+    def load_daily_state() -> Dict[str, Any]:
+        """Load daily tracking state from JSON file"""
+        if not os.path.exists(StateManager.DAILY_STATE_PATH):
+            return {}
+        try:
+            with open(StateManager.DAILY_STATE_PATH, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load daily state: {e}")
+            return {}

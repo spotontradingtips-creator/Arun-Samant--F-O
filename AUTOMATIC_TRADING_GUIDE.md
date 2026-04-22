@@ -6,12 +6,14 @@
 **NO MANUAL INPUT NEEDED!** The bot now automatically:
 - Calculates ATM (At The Money) strike based on spot price
 - Rounds to nearest strike interval (50 for Nifty, 100 for BankNifty)
-- Generates weekly expiry option symbols
+- Generates weekly/monthly expiry option symbols
 - Selects CE (Call) or PE (Put) based on signal
+- **Pre-Flight Connection Check**: Verifies price data before every launch
 
-**Example:**
-- Nifty spot: 19,537.45 → ATM Strike: 19,550 → Symbol: `NIFTY30JAN2419550CE`
-- BankNifty spot: 45,123.75 → ATM Strike: 45,100 → Symbol: `BANKNIFTY29JAN2645100PE`
+**Example Symbols (Verified Case-Sensitive):**
+- Nifty spot: 24,037 → ATM Strike: 24,050 → Symbol: `NIFTY16APR2624050CE`
+- BankNifty: uses `NIFTY BANK` (Capitalized) for spot tracking.
+- Nifty: uses `NIFTY` (Capitalized) for spot tracking.
 
 ### 2. Live Order Placement
 The bot can now send **real orders** to mStock API with status tracking:
@@ -24,6 +26,62 @@ Dashboard will show (once updated):
 - Order status table with color coding
 - Green = Placed, Yellow = Insufficient Funds, Red = Rejected
 - Order count metrics
+
+---
+
+## 🛡️ Pre-Flight System Check
+Before the bot begins monitoring, it now performs a mandatory **Pre-Flight Check**:
+1. **Fetch NIFTY Quote** (Verified `NSE:NIFTY`)
+2. **Fetch NIFTY BANK Quote** (Verified `NSE:NIFTY BANK`)
+3. **Fetch SENSEX Quote** (Verified `BSE:SENSEX`)
+
+**If any quote fails, the bot will ABORT startup.** This prevents "Flying Blind" trading where technical indicators (RSI/MACD) are based on stale or zero data.
+
+---
+
+## 🧼 Data Integrity Guard
+To prevent "Wild Indicators" (like RSI 0 or MACD -3000):
+- **Zero-Value Filter**: Any price data received as 0.0 is automatically ignored.
+- **Spike Filter**: Any price that jumps or drops by >20% instantly (outlier) is rejected.
+- **Self-Healing**: Indicators are only calculated on "Clean" data strings.
+- **Bar Count Guard**: Every index requires a 100-bar "Warm-up" before any signal is evaluated. This ensures MACD and RSI are 100% stable and accurate.
+
+---
+
+## 🛰️ 5-Stage Data Resilience Hierarchy
+To prevent "Blind Trading" where indicators get stuck on old data, the bot uses a 5-layer failover system:
+1. **Direct Broker Quotes**: Primary high-speed feed (200ms).
+2. **1m-to-15m Resampling**: If 15m data is missing today, the bot builds it from 1m ticks.
+3. **YFinance Backup Radar**: Switches to alternate servers (Yahoo Finance) if the broker is slow.
+4. **Log Scavenger**: Reconstructs bars by reading its own price logs if external APIs fail.
+5. **Gap Synthesis (Emergency)**: Automatically bridges gaps from Friday's close to today's spot to reset RSI/MACD to current levels instantly.
+
+---
+
+## 🔒 IP Mismatch & Blindness Protection
+mStock requires your Public IP to be whitelisted. If your IP changes (e.g., router restart):
+1. **Instant shutdown**: The bot will STOP immediately to prevent "Blind Trading" (trading without real price updates).
+2. **Emergency Alert**: You will receive a Telegram alert with the NEW IP address you need to whitelist.
+3. **Recovery**: Update the IP in the mStock portal and restart the bot.
+
+---
+
+## ⚡ Universal Strict Entry Protocol
+The bot has been hardened to follow **Momentum** instead of the **Clock**.
+
+### 1. Irrespective of Timing
+We no longer skip trades just because the MACD crossover happened "too long ago." As long as the market is showing strong momentum **right now**, the bot is authorized to strike.
+
+### 2. The 4 Mandatory "Green" Lights
+For an entry to proceed, **ALL** of these must be true simultaneously:
+- **MACD Trend**: MACD must be on the correct side of the Signal line.
+- **Histogram Momentum (The "Dark Green" Rule)**: The Histogram must be **expanding** (moving UP for CE, moving DOWN for PE). If momentum slows down even slightly, the entry is skipped.
+- **RSI Safety**: Must be between **30 and 70** (Adjustable in config).
+- **ADX Strength**: Must be **> 20** (Intraday) and **> 25** (Daily) to ensure we aren't trading in flat/choppy markets.
+
+---
+
+---
 
 ---
 

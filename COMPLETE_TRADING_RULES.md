@@ -19,9 +19,9 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 | 4 | **No Duplicate Signal** | Fresh crossover required | Won't re-enter on same candle |
 | 5 | **15m RSI Range (CE)** | 30.0 to 65.0 | Momentum must be in range (Call entries) |
 | 5b | **15m RSI Range (PE)** | 35.0 to 75.0 | Wider upper bound for Put entries (allows overbought) |
-| 6 | **Daily ADX** | > 25.0 | Higher timeframe trend strength |
-| 7 | **MACD Histogram** | **Dark Color** | CE: Dark Green (Inc) / PE: Dark Red (Dec) |
-| 8 | **15m ADX** | > 25.0 | **CURRENTLY DISABLED** (Optional) |
+| 6 | **Daily ADX** | **> 30.0** | Higher timeframe trend strength **(HUNTER)** |
+| 7 | **MACD Jump** | **±2.0** | Accel vs prev 15m candle **(HUNTER)** |
+| 8 | **RSI Flow** | **Rising/Falling** | Must be in 'The Flow' **(HUNTER)** |
 
 ### CALL (CE) Specific Conditions
 
@@ -30,7 +30,7 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 | **MACD Signal** | MACD > Signal (Trend Active) | **MACD > Signal (Trend Active)** |
 | **Entry Type** | Relaxed Entry | **RELAXED ENTRY** |
 | **Logic** | Enters if bullish trend is active | **NO Fresh Crossover Needed**. Enters if Trend is Active. |
-| **Momentum** | **Dark Green** | Histogram > 0 AND Histogram > Previous |
+| **Momentum** | **EXPLODING** | Hist > 0 AND Jump >= +2.0 AND RSI Rising |
 
 **Strict Anti-Duplication**:
 -  Cannot re-enter the **EXACT SAME** Option Strike/Symbol if already traded today.
@@ -43,7 +43,7 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 | **MACD Signal** | MACD < Signal (Trend Active) | **MACD < Signal (Trend Active)** |
 | **Entry Type** | Relaxed Entry | **RELAXED ENTRY** |
 | **Logic** | Enters if bearish trend is active | **NO Fresh Crossover Needed**. Enters if Trend is Active. |
-| **Momentum** | **Dark Red** | Histogram < 0 AND Histogram < Previous |
+| **Momentum** | **EXPLODING** | Hist < 0 AND Jump <= -2.0 AND RSI Falling |
 
 **Strict Anti-Duplication**:
 -  Cannot re-enter the **EXACT SAME** Option Strike/Symbol if already traded today.
@@ -109,10 +109,10 @@ Checked **every 1 second** in **priority order**:
 
 | Target | Value | Calculation |
 |--------|-------|-------------|
-| **Profit Target** | **Rs 350** | Net P&L per position |
+| **Profit Target** | **Rs 2000** | Net P&L per position |
 | **Safety Net** | **-50%** | Hard exit on premium loss |
 
-**Current Setting**: `profit_target_amount = 350.0` (Hardcoded for safety)
+**Current Setting**: `profit_target_amount = 2000.0` (Hardcoded for safety)
 
 ### Priority 3: Trend Reversal (Safety Exit)
 **Applies regardless of current profit. MUST BE CONFIRMED ON CANDLE CLOSE.**
@@ -201,7 +201,7 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
 |-----------|-------|
 | Period | 14 |
 | 15m ADX Min | 25.0 (DISABLED) |
-| Daily ADX Min | 25.0 (ACTIVE) |
+| Daily ADX Min | 30.0 (ACTIVE - HUNTER) |
 
 ---
 
@@ -226,22 +226,21 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
 
 ---
  
- ##  DAILY WIN-LOCK (TRAILING SL)
- 
- This system protects your accumulated daily profits by setting a rising "floor."
- 
- | Total Daily Profit | Locked-In Floor | Logic |
- | :--- | :--- | :--- |
- | ₹350 - ₹699 | **₹250** | Locks in ₹250. |
- | ₹700 - ₹1,049 | **₹500** | Locks in ₹500. |
- | ₹1,050 - ₹1,399 | **₹750** | Locks in ₹750. |
- | ₹1400 - ₹1749 | **₹1000** | Locks in ₹1000 if profit reached ₹1400 |
- 
- **How it works**:
- 1. The bot tracks your **Peak Daily Profit** (including open trades).
- 2. For every **₹350** of profit reached, it secures a floor **₹100** below that step.
- 3. If your total P&L drops to this floor, the bot **immediately exits the current trade**.
- 4. It does **NOT** stop for the day; it will look for new entries as per regular rules.
+  ## 4. DAILY WIN-LOCK (SYSTEM FLOOR)
+  
+  This system protects your accumulated daily profits by setting a rising "floor" across all trades.
+  
+  | Peak Daily Profit | Locked-In Floor | Step Size |
+  | :--- | :--- | :--- |
+  | Rs 350 | **Rs 250** | Rs 350 |
+  | Rs 700 | **Rs 500** | Rs 350 |
+  | Rs 1,050 | **Rs 750** | Rs 350 |
+  | Rs 1,400 | **Rs 1,000** | Rs 350 |
+  
+  **Hardened Resilence Logic**:
+  1. **Dual-Thread Sync**: P&L verification runs in a background thread to ensure zero latency in the monitoring loop.
+  2. **Safe-Startup Reset**: If the bot restarts and profit is already below the floor, it automatically resets the Peak to allow fresh trade management.
+  3. **Non-Stop Heartbeats**: Live P&L/Floor status is published every 60 seconds while trades are active.
  
  ---
  
@@ -298,7 +297,7 @@ All these can be changed in [`config.json`](file:///c:/Antigravity/Arun%20Samant
 From your [`config.json`](file:///c:/Antigravity/Arun%20Samant%20-%20F&O/config.json):
 - **Live Trading**:  ENABLED
 - **Strike Depth**: 0 (ATM)
-- **Profit Target**: Rs 350.0 (Hardcoded)
+- **Profit Target**: Rs 2000.0 (Hardcoded)
 - **Daily Profit Cap**: **DISABLED** (No automatic stop)
 - **NIFTY SL**: 0.7% (base)
 - **BANKNIFTY SL**: 1.2% (base)
@@ -323,5 +322,10 @@ The bot uses a **Dual-Layer Memory System** to ensure safety across restarts:
     *   **Critical Safety**:
         *   **No Double Entry**: Prevents re-entering a symbol if a trade was already taken on the same signal.
         *   **Loss Tracking**: Calculates Total Daily P&L from *all* sessions today to enforce the **Daily Loss Limit**.
+
+---
+## 7. INFRASTRUCTURE & CONNECTIVITY
+- **Verified Public IP**: **`49.37.133.202`** (Verified on 2026-04-14)
+- **Status**: Dynamic IP - Requires monitoring for rotation.
 
 *This means you can safely stop/start the bot without losing track of your day's progress.*

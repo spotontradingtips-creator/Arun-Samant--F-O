@@ -188,3 +188,25 @@ def format_currency(amount: float) -> str:
 def format_percentage(value: float) -> str:
     """Format value as percentage"""
     return f"{value:.2f}%"
+
+
+def normalize_symbol(name: str) -> str:
+    """
+    Standardizes index names across the system to prevent Zombie Mode.
+    Maps all variants to: NIFTY, BANKNIFTY, or SENSEX
+    """
+    if not name:
+        return "UNKNOWN"
+    
+    name = str(name).upper().replace(" ", "").replace(":", "")
+    
+    if "BANK" in name:
+        return "BANKNIFTY"
+    if "SENSEX" in name:
+        return "SENSEX"
+    if "FIN" in name:
+        return "FINNIFTY"
+    if "NIFTY" in name:
+        return "NIFTY"
+        
+    return name

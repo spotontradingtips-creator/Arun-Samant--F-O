@@ -272,6 +272,9 @@ def sync_positions_from_broker(bot, api: MStockAPI) -> int:
         else:
             logger.info("Sync complete. State matches Broker.")
             
+        # MANDATORY: Sync realized P&L to ensure Win-Lock is accurate
+        bot.sync_daily_pnl(api)
+            
         return synced_count
         
     except Exception as e:

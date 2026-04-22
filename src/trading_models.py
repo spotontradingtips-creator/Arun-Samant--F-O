@@ -17,13 +17,14 @@ class ExitReason(Enum):
     EOD_CLOSE = "EOD Force Close"
     DAILY_WIN_LOCK = "Daily Win-Lock (TSL)"
     BROKER_SYNC_EXIT = "Broker Sync Reconciliation"
+    TRAILING_STOPLOSS = "Dynamic Trailing SL Hit"
 
 
 @dataclass
 class Position:
     """Trading position data class"""
     position_id: str
-    underlying: str  # "NIFTY50" or "BANKNIFTY"
+    underlying: str  # "NIFTY" or "BANKNIFTY"
     trade_type: TradeType  # CE or PE
     entry_time: datetime
     entry_price: float  # Premium price
@@ -42,6 +43,10 @@ class Position:
     pnl_percentage: Optional[float] = None
     
     macd_entry_idx: Optional[int] = None  # Track which candle had entry signal
+    last_warning_time: Optional[datetime] = None  # Prevent spamming early warnings
+    
+    max_pnl_reached: float = 0.0
+    dynamic_trailing_sl: Optional[float] = None
     
     def calculate_pnl(self, current_premium: float) -> float:
         """Calculate current P&L"""
