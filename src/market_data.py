@@ -962,17 +962,18 @@ class MStockAPI:
                     "NIFTY BANK": ["^NSEBANK", "NIFTYBANK.NS"]
                 }
                 
-                if (timeframe in ["1minute", "15minute", "5minute"]) and symbol in yf_symbols:
+                if (timeframe in ["1minute", "15minute", "5minute", "day"]) and symbol in yf_symbols:
                     try:
                         import yfinance as yf
                         tickers_to_try = yf_symbols[symbol]
-                        yf_interval = "1m" if timeframe == "1minute" else "15m"
+                        yf_interval = "1m" if timeframe == "1minute" else ("1d" if timeframe == "day" else "15m")
+                        yf_period = "2y" if timeframe == "day" else "5d"
                         
                         yf_df = None
                         for yf_ticker in tickers_to_try:
                             try:
                                 # Fetch a bit more data for better interval detection
-                                yf_df = yf.download(yf_ticker, period="5d", interval=yf_interval, progress=False, auto_adjust=False)
+                                yf_df = yf.download(yf_ticker, period=yf_period, interval=yf_interval, progress=False, auto_adjust=False)
                                 if yf_df is not None and not yf_df.empty:
                                     break
                             except: continue
