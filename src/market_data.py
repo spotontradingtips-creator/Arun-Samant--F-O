@@ -1005,6 +1005,8 @@ class MStockAPI:
                                 else:
                                     yf_df.index = yf_df.index.tz_convert("Asia/Kolkata")
                                     
+                                if timeframe == "day":
+                                    return yf_df[["open", "high", "low", "close"]]
                                 return yf_df.between_time("09:15", "15:30")[["open", "high", "low", "close"]]
                     except Exception as yfe: 
                         logger.error(f"YFinance fallback chain failed for {symbol}: {yfe}")
