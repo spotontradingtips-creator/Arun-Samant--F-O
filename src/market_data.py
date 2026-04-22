@@ -936,6 +936,9 @@ class MStockAPI:
                 if last_candle_time.date() < now_ist.date():
                     logger.warning(f"[STALE FETCH] {symbol} {timeframe} only returned bars up to {last_candle_time.date()}.")
                     is_empty_or_stale = True
+                elif timeframe == "day" and len(candles) < days:
+                    logger.warning(f"[STABILITY] {symbol} {timeframe} only returned {len(candles)}/{days} bars. Triggering recovery...")
+                    is_empty_or_stale = True
 
             if is_empty_or_stale:
                 logger.warning(f"[RECOVERY] {symbol} {timeframe} Data Gap. Initiating fallback chain...")
