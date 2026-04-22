@@ -983,7 +983,12 @@ class MStockAPI:
                         
                         if yf_df is not None and not yf_df.empty:
                             # [SHIELD] Freshness Guard: If YF also returns stale (Friday) data, fall through to Synthesis
-                            yf_last_time = yf_df.index[-1].tz_convert("Asia/Kolkata")
+                            yf_index = yf_df.index
+                            if yf_index.tz is None:
+                                yf_last_time = yf_index[-1].tz_localize("UTC").tz_convert("Asia/Kolkata")
+                            else:
+                                yf_last_time = yf_index[-1].tz_convert("Asia/Kolkata")
+                            
                             ist = pytz.timezone("Asia/Kolkata")
                             now = datetime.now(ist)
                             if yf_last_time.date() < now.date() and now.hour >= 9:
