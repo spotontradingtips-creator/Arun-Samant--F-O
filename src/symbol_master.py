@@ -24,6 +24,7 @@ class SymbolMaster:
         self.master_data = {} 
         self.expiries = {} # { "BANKNIFTY": [date1, date2, ...] }
         self.symbol_map = {} # { "SYMBOLNAME": "TOKEN" }
+        self.future_tokens = {} # { "NIFTY": {"token": "...", "exch": "..."} }
         self.initialized = True
         self.load_master()
 
@@ -59,41 +60,53 @@ class SymbolMaster:
                 expiry_str = item.get('expiry') # "24Feb2026"
                 strike_str = item.get('strike') # "45000"
                 option_type = "CE" if "CE" in item.get('name', '') else "PE" if "PE" in item.get('name', '') else None
-                instrument = item.get('instrumenttype') # OPTIDX etc
-                
-                # We only want OPTIDX for these indices usually, but NIFTY might be OPTIDX.
-                # master file showed "instrumenttype":"OPTIDX" for BANKNIFTY.
-                if instrument != "OPTIDX":
+                instrument = item.get('instrumenttype') # OPTIDX or FUTIDX
+                # We want OPTIDX for options and FUTIDX for volume proxy (VWAP)
+                if instrument not in ["OPTIDX", "FUTIDX"]:
                     continue
                     
-                if not (symbol_prefix and expiry_str and strike_str and option_type):
+                if instrument == "OPTIDX" and not (symbol_prefix and expiry_str and strike_str and option_type):
+                    continue
+                if instrument == "FUTIDX" and not (symbol_prefix and expiry_str):
                     continue
                 
                 try:
                     expiry_date = datetime.strptime(expiry_str, "%d%b%Y").date()
-                    strike = float(strike_str)
+                    # For futures, strike is 0 or irrelevant
+                    strike = float(strike_str) if strike_str else 0.0
                 except ValueError:
                     continue
 
-                if symbol_prefix not in self.master_data:
-                    self.master_data[symbol_prefix] = {}
-                    self.expiries[symbol_prefix] = set()
-
-                if expiry_date not in self.master_data[symbol_prefix]:
-                    self.master_data[symbol_prefix][expiry_date] = {}
-                
-                self.expiries[symbol_prefix].add(expiry_date)
-                
-                if strike not in self.master_data[symbol_prefix][expiry_date]:
-                    self.master_data[symbol_prefix][expiry_date][strike] = {}
-                    
                 name = item.get('name', '').strip()
                 if not name:
                     continue
-                
+
                 # Store mappings
-                self.master_data[symbol_prefix][expiry_date][strike][option_type] = name
+                if instrument == "OPTIDX":
+                    if symbol_prefix not in self.master_data:
+                        self.master_data[symbol_prefix] = {}
+                        self.expiries[symbol_prefix] = set()
+
+                    if expiry_date not in self.master_data[symbol_prefix]:
+                        self.master_data[symbol_prefix][expiry_date] = {}
+                    
+                    self.expiries[symbol_prefix].add(expiry_date)
+                    
+                    if strike not in self.master_data[symbol_prefix][expiry_date]:
+                        self.master_data[symbol_prefix][expiry_date][strike] = {}
+                    
+                    self.master_data[symbol_prefix][expiry_date][strike][option_type] = name
                 
+                elif instrument == "FUTIDX":
+                    # Store the nearest future token as the volume proxy
+                    if symbol_prefix not in self.future_tokens:
+                        self.future_tokens[symbol_prefix] = []
+                    self.future_tokens[symbol_prefix].append({
+                        "token": str(item.get('token', '')), 
+                        "expiry": expiry_date,
+                        "exch": item.get('exch_seg', 'NFO')
+                    })
+
                 # Add check since item.get('token') might be string or int
                 token = str(item.get('token', ''))
                 if token:
@@ -101,11 +114,19 @@ class SymbolMaster:
                     
                 count += 1
                 
-            # Sort expiries
+            # Sort expiries and select current future tokens
             for sym in self.expiries:
                 self.expiries[sym] = sorted(list(self.expiries[sym]))
+            
+            # For futures, pick the one with the earliest expiry (Current month)
+            for sym in self.future_tokens:
+                sorted_futs = sorted(self.future_tokens[sym], key=lambda x: x['expiry'])
+                self.future_tokens[sym] = {
+                    "token": sorted_futs[0]['token'],
+                    "exch": sorted_futs[0]['exch']
+                }
                 
-            logger.info(f"SymbolMaster loaded {count} options from master file. (Token map size: {len(self.symbol_map)})")
+            logger.info(f"SymbolMaster loaded {count} symbols. (Tokens: {len(self.symbol_map)}, Future Proxies: {len(self.future_tokens)})")
             
         except Exception as e:
             logger.error(f"Failed to load master file: {e}")

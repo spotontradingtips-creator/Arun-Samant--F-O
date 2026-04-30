@@ -360,8 +360,10 @@ class MStockAPI:
                         logger.error(f"[SMART RETRY FAILED] {token_id} returned {response.status_code}")
                         logger.error(f"  Body: {response.text}")
                 else:
-                    logger.error(f"[SMART FAIL] {symbol} fetch failed (400) and no token mapping found for {lookup_key}")
-                    logger.error(f"  Broker Response: {response.text}")
+                    # Silence logs for numeric tokens (Futures volume proxy) to prevent console clutter
+                    if not symbol.isdigit():
+                        logger.error(f"[SMART FAIL] {symbol} fetch failed (400) and no token mapping found for {lookup_key}")
+                        logger.error(f"  Broker Response: {response.text}")
             
             # [NEW] ANTI-BLIND WATCHDOG: Global Fallback Trigger
             if response.status_code != 200:
@@ -408,8 +410,8 @@ class MStockAPI:
                         logger.critical(f"FATAL IP MISMATCH detected during quote fetch for {symbol}")
                         raise IPMismatchError("IP Address mismatch in mStock portal.")
                 
-                # Consolidate logging: Only spam if it's NOT an index
-                if not is_index_symbol(params.get("i", symbol)): 
+                # Consolidate logging: Only spam if it's NOT an index or a numeric token
+                if not is_index_symbol(params.get("i", symbol)) and not symbol.isdigit(): 
                     logger.error(f"Quote fetch error for {symbol} ({params.get('i')}): {response.status_code}")
                     try:
                         error_body = response.text
@@ -557,7 +559,7 @@ class MStockAPI:
                 if yf_df is not None and not yf_df.empty:
                     # Clean up yfinance columns (handle multi-index headers)
                     yf_df.columns = [col[0] if isinstance(col, tuple) else col for col in yf_df.columns]
-                    yf_df = yf_df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'})
+                    yf_df = yf_df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
                     
                     # Convert to IST
                     if yf_df.index.tz is None:
@@ -777,7 +779,8 @@ class MStockAPI:
                 'open': effective_start_price if i == 0 else current_spot,
                 'high': max(effective_start_price, current_spot),
                 'low': min(effective_start_price, current_spot),
-                'close': current_spot
+                'close': current_spot,
+                'volume': 0
             })
             effective_start_price = current_spot
             
@@ -883,11 +886,55 @@ class MStockAPI:
         try:
             df = None
             # Build time window
-            from datetime import timedelta
-            import pytz
-            
             ist = pytz.timezone("Asia/Kolkata")
             now_ist = datetime.now(ist)
+            
+            # [RULE 97] Titan-Shield Primary: For Indices Daily Data, prioritize YFinance
+            # over broker API to ensure 250-bar stability and consistent ADX alignment.
+            yf_indices = {
+                "SENSEX": "^BSESN", 
+                "NIFTY": "^NSEI", 
+                "NIFTY 50": "^NSEI", 
+                "BANKNIFTY": "^NSEBANK", 
+                "NIFTY BANK": "^NSEBANK"
+            }
+            
+            if timeframe == "day" and symbol in yf_indices:
+                try:
+                    import yfinance as yf
+                    yf_ticker = yf_indices[symbol]
+                    # Fetch slightly more to ensure 250 bars after cleanup
+                    yf_df = yf.download(yf_ticker, period="2y", interval="1d", progress=False, auto_adjust=False)
+                    if yf_df is not None and not yf_df.empty:
+                        if isinstance(yf_df.columns, pd.MultiIndex):
+                            yf_df.columns = [col[0] for col in yf_df.columns]
+                        
+                        yf_df = yf_df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
+                        yf_df.index = yf_df.index.tz_localize(None).tz_localize("Asia/Kolkata") # Standardize to IST
+                        
+                        # [RESILIENCE] Inject current LTP into the last bar for real-time Daily ADX
+                        live_quote = self.get_quote(symbol, exchange)
+                        if live_quote and live_quote.get('last_price'):
+                             ltp = live_quote['last_price']
+                             last_idx = yf_df.index[-1]
+                             # If the last bar is today, update it. If it's yesterday, append it.
+                             if last_idx.date() == now_ist.date():
+                                  yf_df.iloc[-1, yf_df.columns.get_loc('close')] = ltp
+                                  yf_df.iloc[-1, yf_df.columns.get_loc('high')] = max(yf_df.iloc[-1]['high'], ltp)
+                                  yf_df.iloc[-1, yf_df.columns.get_loc('low')] = min(yf_df.iloc[-1]['low'], ltp)
+                             else:
+                                  today_dt = pd.Timestamp(now_ist.date(), tz="Asia/Kolkata")
+                                  new_day = pd.DataFrame([{'open': ltp, 'high': ltp, 'low': ltp, 'close': ltp}], index=[today_dt])
+                                  yf_df = pd.concat([yf_df, new_day])
+                        
+                        logger.info(f"[TITAN-SHIELD] {symbol} Daily Data: SECURED via YFinance (Rule 97)")
+                        cols_to_return = ["open", "high", "low", "close"]
+                        if "volume" in yf_df.columns: cols_to_return.append("volume")
+                        else: yf_df["volume"] = 0; cols_to_return.append("volume")
+                        return yf_df[cols_to_return].tail(days)
+                except Exception as e:
+                    logger.warning(f"[TITAN-SHIELD] Index Primary Fetch failed for {symbol}: {e}. Falling back to Broker...")
+
             from_dt = (now_ist - timedelta(days=days)).replace(hour=9, minute=15, second=0, microsecond=0)
             to_dt = now_ist
             
@@ -951,9 +998,9 @@ class MStockAPI:
                         logger.info(f"[FIX] {symbol}: Successfully resampled 1m -> {timeframe} to bridge today's gap.")
                         rs_map = {"15minute": "15min", "5minute": "5min", "minute": "1min", "1minute": "1min", "day": "1D"}
                         freq = rs_map.get(timeframe, "15min")
-                        resampled = m1_df.resample(freq).agg({
-                            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'
-                        })
+                        agg_dict = {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'}
+                        if 'volume' in m1_df.columns: agg_dict['volume'] = 'sum'
+                        resampled = m1_df.resample(freq).agg(agg_dict)
                         return resampled.dropna()
 
                 # 2. YFinance Fallback
@@ -998,16 +1045,20 @@ class MStockAPI:
                                     yf_df.columns = [col[0] for col in yf_df.columns]
                                 
                                 logger.info(f"[FIX] {symbol}: Recovered {len(yf_df)} bars via YFinance fallback ({yf_ticker})")
-                                yf_df = yf_df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'})
+                                yf_df = yf_df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'})
                                 
                                 if yf_df.index.tz is None:
                                     yf_df.index = yf_df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
                                 else:
                                     yf_df.index = yf_df.index.tz_convert("Asia/Kolkata")
                                     
+                                yf_cols = ["open", "high", "low", "close"]
+                                if "volume" in yf_df.columns: yf_cols.append("volume")
+                                else: yf_df["volume"] = 0; yf_cols.append("volume")
+                                
                                 if timeframe == "day":
-                                    return yf_df[["open", "high", "low", "close"]]
-                                return yf_df.between_time("09:15", "15:30")[["open", "high", "low", "close"]]
+                                    return yf_df[yf_cols]
+                                return yf_df.between_time("09:15", "15:30")[yf_cols]
                     except Exception as yfe: 
                         logger.error(f"YFinance fallback chain failed for {symbol}: {yfe}")
                 
@@ -1025,7 +1076,10 @@ class MStockAPI:
                     if df is not None:
                         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert("Asia/Kolkata")
                         df.set_index("timestamp", inplace=True)
-                        df = df[["open", "high", "low", "close"]]
+                        cols_to_return = ["open", "high", "low", "close"]
+                        if "volume" in df.columns: cols_to_return.append("volume")
+                        else: df["volume"] = 0; cols_to_return.append("volume")
+                        df = df[cols_to_return]
                 
                 # Apply synthesis (Handles 15m and Daily)
                 if df is not None and not df.empty:
@@ -1059,10 +1113,11 @@ class MStockAPI:
                              
                          if ltp > 0:
                              today_dt = pd.Timestamp(now.date(), tz="Asia/Kolkata")
-                             new_day = pd.DataFrame([{'open': q_open, 'high': q_high, 'low': q_low, 'close': ltp}], index=[today_dt])
+                             new_day = pd.DataFrame([{'open': q_open, 'high': q_high, 'low': q_low, 'close': ltp, 'volume': 0}], index=[today_dt])
                              df = pd.concat([df, new_day]) if df is not None else new_day
                              logger.info(f"[FIX] {symbol}: Synthesized today's Daily bar (O:{q_open} H:{q_high} L:{q_low} C:{ltp})")
-                             return df
+                             if "volume" not in df.columns: df["volume"] = 0
+                             return df[["open", "high", "low", "close", "volume"]]
 
                 return df
             
@@ -1079,7 +1134,8 @@ class MStockAPI:
             # [STABILITY] Clean data: remove 0 or NaN prices that cause indicator spikes
             df = df[(df['close'] > 0) & (df['close'].notna())]
             
-            return df[["open", "high", "low", "close"]]
+            if "volume" not in df.columns: df["volume"] = 0
+            return df[["open", "high", "low", "close", "volume"]]
 
             
         except Exception as e:

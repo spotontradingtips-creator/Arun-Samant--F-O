@@ -4,8 +4,9 @@ Simple authentication script for mStock API
 import os
 import sys
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(__file__))
+# Add project root to path
+root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, root)
 
 from src.market_data import MStockAPI
 

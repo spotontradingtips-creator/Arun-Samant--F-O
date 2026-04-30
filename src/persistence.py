@@ -17,7 +17,7 @@ class StateManager:
     @staticmethod
     def _json_serial(obj):
         """JSON serializer for objects not serializable by default json code"""
-        if isinstance(obj, datetime):
+        if isinstance(obj, (datetime, date)):
             return obj.isoformat()
         if isinstance(obj, TradeType):
             return obj.value
@@ -65,7 +65,6 @@ class StateManager:
             loaded_positions = {}
             for underlying, pos_data in data.items():
                 # Reconstruct Position object
-                # Convert ISO strings back to datetime and Enums
                 if pos_data.get('entry_time'):
                     pos_data['entry_time'] = datetime.fromisoformat(pos_data['entry_time'])
                 if pos_data.get('exit_time'):
@@ -77,14 +76,6 @@ class StateManager:
                 if pos_data.get('exit_reason'):
                     pos_data['exit_reason'] = ExitReason(pos_data['exit_reason'])
                     
-                # Create object
-                # Filter out keys that might not match __init__ if class changed, 
-                # but dataclass typically accepts these if they match fields.
-                # Inspect Position fields:
-                # position_id, underlying, trade_type, entry_time, entry_price, 
-                # entry_underlying_price, lot_size, sl_percentage, vix_at_entry, ...
-                
-                # Safer: construct with known keys
                 position = Position(**pos_data)
                 loaded_positions[underlying] = position
                 
@@ -105,7 +96,7 @@ class StateManager:
             for pos in history:
                 data.append(pos.__dict__)
                 
-            # Atomic save: Write to temp file then rename
+            # Atomic save
             hist_path = "data/daily_history.json"
             tmp_path = hist_path + ".tmp"
             with open(tmp_path, 'w') as f:
@@ -135,13 +126,11 @@ class StateManager:
                 
             history = []
             for pos_data in data:
-                # Convert date strings
                 if pos_data.get('entry_time'):
                     pos_data['entry_time'] = datetime.fromisoformat(pos_data['entry_time'])
                 if pos_data.get('exit_time'):
                     pos_data['exit_time'] = datetime.fromisoformat(pos_data['exit_time'])
                 
-                # Enum conversion
                 if pos_data.get('trade_type'):
                     pos_data['trade_type'] = TradeType(pos_data['trade_type'])
                 if pos_data.get('exit_reason'):
@@ -153,13 +142,6 @@ class StateManager:
         except Exception as e:
             logger.error(f"Failed to load history: {e}")
             return []
-
-    @staticmethod
-    def _json_serial(obj):
-        """JSON serializer for objects not serializable by default json code"""
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        raise TypeError ("Type %s not serializable" % type(obj))
 
     @staticmethod
     def save_daily_state(state: Dict[str, Any]):
@@ -189,3 +171,18 @@ class StateManager:
         except Exception as e:
             logger.error(f"Failed to load daily state: {e}")
             return {}
+
+    @staticmethod
+    def is_paused() -> bool:
+        """Check if trading is paused"""
+        state = StateManager.load_daily_state()
+        return state.get('is_paused', False)
+
+    @staticmethod
+    def set_paused(paused: bool):
+        """Set trading pause state"""
+        state = StateManager.load_daily_state()
+        state['is_paused'] = paused
+        state['updated_at'] = datetime.now().isoformat()
+        StateManager.save_daily_state(state)
+        logger.info(f"Trading state updated: {'PAUSED' if paused else 'RESUMED'}")

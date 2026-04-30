@@ -68,7 +68,7 @@ def wait_for_market_open():
             logger.info("Market closed for today.")
             time.sleep(3600)
 
-def get_market_data_with_indicators(api, symbol, exchange, token):
+def get_market_data_with_indicators(api, symbol, exchange, token, name):
     try:
         quote = api.get_quote(symbol, exchange)
         spot = quote.get('last_price', 0) if quote else 0
@@ -107,6 +107,42 @@ def get_market_data_with_indicators(api, symbol, exchange, token):
         i_df['MACD'], i_df['MACD_Signal'], i_df['MACD_Hist'] = TechnicalIndicators.calculate_macd(i_df['close'])
         i_df['RSI'] = TechnicalIndicators.calculate_rsi(i_df['close'])
         i_df['ADX'], i_df['+DI'], i_df['-DI'] = TechnicalIndicators.calculate_adx(i_df['high'], i_df['low'], i_df['close'])
+
+        # [NEW] VWAP Implementation (Futures Volume Proxy)
+        # 1. Fetch volume from front-month Future (Spot indices have 0 volume)
+        f_info = SymbolMaster().future_tokens.get(name)
+        if f_info:
+            future_token = f_info['token']
+            future_exch = f_info['exch']
+            # Fetch last 2 days of 15m Futures history for volume
+            f_df = api.get_historical_data(symbol, future_exch, future_token, "15minute", days=2)
+            if f_df is not None and not f_df.empty:
+                # Merge volume into i_df safely
+                if 'volume' in f_df.columns:
+                    try:
+                        i_df = i_df.join(f_df[['volume']], rsuffix='_fut')
+                        if 'volume_fut' in i_df.columns:
+                            i_df['volume'] = i_df['volume_fut'].fillna(0)
+                        else:
+                            i_df['volume'] = i_df['volume'].fillna(0)
+                    except Exception as e:
+                        logger.error(f"[VWAP] {symbol}: Future Volume merge failed ({e}). VWAP disabled.")
+                        i_df['VWAP'] = 0
+                    # Calculate VWAP
+                    i_df['VWAP'] = TechnicalIndicators.calculate_vwap(i_df)
+                    logger.debug(f"[VWAP] {symbol}: Calculated using Future Proxy ({future_token})")
+                else:
+                    logger.warning(f"[VWAP] {symbol}: Future Proxy missing volume. VWAP disabled.")
+                    i_df['VWAP'] = 0
+            else:
+                logger.warning(f"[VWAP] {symbol}: Could not fetch Future Volume for {future_token}. VWAP disabled.")
+                i_df['VWAP'] = 0
+        else:
+            # For symbols with native volume (Stock Options/Futures)
+            if 'volume' in i_df.columns:
+                i_df['VWAP'] = TechnicalIndicators.calculate_vwap(i_df)
+            else:
+                i_df['VWAP'] = 0
 
         is_fresh = api.last_fetch_freshness.get(symbol, False)
         return d_df, i_df, spot, 15.0, stable, is_fresh
@@ -249,7 +285,7 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                     # Check cache
                     state = cache.get(u)
                     if not state or (time.time() - state['t']) > 300:
-                        d, i, _, _, ok, fresh = get_market_data_with_indicators(api, broker_sym, exch, token)
+                        d, i, _, _, ok, fresh = get_market_data_with_indicators(api, broker_sym, exch, token, u)
                         if d is not None:
                             cache[u] = {'d': d, 'i': i, 't': time.time(), 'ok': ok, 'fresh': fresh}
                     else:
@@ -257,34 +293,66 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                         # [FIX] Set 'stable' and 'spot' if not in cache (standardizing variables)
                         stable = ok
                         
-                        # [STABILITY GUARD] Validate spot against last bar
-                        if not i.empty:
+                        # [STABILITY GUARD] Validate state
+                        if i is None or i.empty or d is None or d.empty:
+                            logger.warning(f"[RECOVERY] {u}: Indicators missing in cache. Forcing fresh fetch next cycle.")
+                            if u in cache: del cache[u]
+                            continue
+                        else:
+                            # [STABILITY GUARD] Validate spot against last bar
                             prev_c = i.iloc[-1]['close']
                             # If spot deviates by > 20% from last 15m closed price, it's likely bad data
                             if prev_c > 0 and abs(spot - prev_c) > (prev_c * 0.20):
                                 logger.warning(f"[DATA GUARD] {u} rejected suspicious spot: {spot} (Prev 15m Close: {prev_c})")
                                 continue
-                        
-                        b_s = now_ist().replace(minute=now_ist().minute - now_ist().minute % 15, second=0, microsecond=0)
-                        if b_s not in i.index:
-                            # Leading Edge Synthesis: Connect Friday's close to today's open
-                            last_close = i.iloc[-1]['close']
-                            new_bar = pd.DataFrame([{
-                                'open': last_close, 'high': max(last_close, spot), 
-                                'low': min(last_close, spot), 'close': spot
-                            }], index=[b_s])
-                            i = pd.concat([i, new_bar])
-                        else:
-                            i.loc[b_s, 'close'] = spot
-                            i.loc[b_s, 'high'] = max(i.loc[b_s, 'high'], spot)
-                            i.loc[b_s, 'low'] = min(i.loc[b_s, 'low'], spot)
                             
-                        # Complete indicator recalculation for accuracy (RSI/MACD strictly on 15m)
-                        i['MACD'], i['MACD_Signal'], i['MACD_Hist'] = TechnicalIndicators.calculate_macd(i['close'])
-                        i['RSI'] = TechnicalIndicators.calculate_rsi(i['close'])
-                        i['ADX'], i['+DI'], i['-DI'] = TechnicalIndicators.calculate_adx(i['high'], i['low'], i['close'])
+                            b_s = now_ist().replace(minute=now_ist().minute - now_ist().minute % 15, second=0, microsecond=0)
+                            if b_s not in i.index:
+                                # Leading Edge Synthesis: Connect Friday's close to today's open
+                                last_close = i.iloc[-1]['close']
+                                new_bar = pd.DataFrame([{
+                                    'open': last_close, 'high': max(last_close, spot), 
+                                    'low': min(last_close, spot), 'close': spot, 'volume': 0
+                                }], index=[b_s])
+                                i = pd.concat([i, new_bar])
+                            else:
+                                i.loc[b_s, 'close'] = spot
+                                i.loc[b_s, 'high'] = max(i.loc[b_s, 'high'], spot)
+                                i.loc[b_s, 'low'] = min(i.loc[b_s, 'low'], spot)
+                            
+                    # Complete indicator recalculation for accuracy (RSI/MACD strictly on 15m)
+                    i['MACD'], i['MACD_Signal'], i['MACD_Hist'] = TechnicalIndicators.calculate_macd(i['close'])
+                    i['RSI'] = TechnicalIndicators.calculate_rsi(i['close'])
+                    i['ADX'], i['+DI'], i['-DI'] = TechnicalIndicators.calculate_adx(i['high'], i['low'], i['close'])
+                    
+                    # [NEW] Recalculate VWAP for leading edge
+                    if 'volume' in i.columns:
+                        # Attempt to update volume from live Future quote if available
+                        f_info = SymbolMaster().future_tokens.get(name)
+                        if f_info:
+                            f_q = api.get_quote(f_info['token'], f_info['exch'])
+                            if f_q and f_q.get('volume'):
+                                # Approximate 15m volume (since broker gives cumulative daily volume)
+                                # We'll use the cumulative volume for VWAP calculation
+                                i.loc[b_s, 'volume'] = f_q['volume']
                         
-                    if d is None or i is None: continue
+                        i['VWAP'] = TechnicalIndicators.calculate_vwap(i)
+                        
+                        # [SAFETY] Explicitly block processing if indicators failed to load
+                        if d is None or i is None or i.empty: continue
+                        
+                        # [LOGIC TRANSPARENCY] Heartbeat (Rule: Explicit visibility every 60s)
+                        lg_timer = getattr(entry_monitoring_loop, "last_lg", {})
+                        if time.time() - lg_timer.get(u, 0) > 60:
+                            daily_adx = d.iloc[-1]['ADX'] if not d.empty else 0
+                            rsi_15m = i.iloc[-1]['RSI'] if not i.empty else 0
+                            vwap = i.iloc[-1].get('VWAP', 0) if not i.empty else 0
+                            hist = i.iloc[-1].get('MACD_Hist', 0) if not i.empty else 0
+                            logger.info(f"[LOGIC_SNAPSHOT] {u:<10} | Price: {spot:<8.2f} | VWAP: {vwap:<8.2f} | RSI: {rsi_15m:<5.2f} | ADX: {daily_adx:<5.2f} | Hist: {hist:<5.2f}")
+                            lg_timer[u] = time.time()
+                            entry_monitoring_loop.last_lg = lg_timer
+
+                    if d is None or i is None or i.empty: continue
                     idx = len(i) - 1
                     
                     # Reversal Check

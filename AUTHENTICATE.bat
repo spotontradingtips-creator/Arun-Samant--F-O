@@ -6,6 +6,6 @@ echo ================================================================
 echo.
 
 cd /d "%~dp0"
-python authenticate.py
+python src/scripts/authenticate.py
 
 pause

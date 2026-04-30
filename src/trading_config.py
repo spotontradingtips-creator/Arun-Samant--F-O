@@ -28,10 +28,10 @@ class TradingConfig:
     morning_buffer_minutes: int = 15   # 15 min buffer (start at 9:30 AM)
     
     # 1st Trade Safety Hard Limit
-    first_trade_hard_loss_limit: float = 1500.0 # Exit 1st trade if loss exceeds this
+    first_trade_hard_loss_limit: float = 2000.0 # Exit 1st trade if loss exceeds this
     
     # VIX Configuration
-    vix_min_threshold: float = 10.0    # Skip trading if VIX < this
+    vix_min_threshold: float = 12.0    # Skip trading if VIX < this
     
     # VIX-Adjusted Stop Loss Ranges (Based on UNDERLYING SPOT MOVEMENT, not premium)
     # For CE: SL triggers when spot DROPS by percentage
@@ -67,8 +67,8 @@ class TradingConfig:
     
     # Daily Win-Lock (Trailing SL on total daily P&L)
     win_lock_enabled: bool = True
-    win_lock_step: float = 350.0
-    win_lock_floor_step: float = 250.0
+    win_lock_step: float = 1000.0
+    win_lock_floor_step: float = 500.0
     
     # Technical Indicator Periods
     macd_fast: int = 12
@@ -78,7 +78,7 @@ class TradingConfig:
     adx_period: int = 14
     
     # RSI Range for Entry (CE - Call Options)
-    rsi_min: float = 30.0
+    rsi_min: float = 35.0
     rsi_max: float = 70.0
     
     # RSI Range for Entry (PE - Put Options)
@@ -87,11 +87,10 @@ class TradingConfig:
     rsi_pe_max: float = 70.0
     
     # ADX Threshold
-    adx_min: float = 30.0              # [HUNTER] Minimum ADX for trend strength
-    adx_daily_min: float = 30.0        # [HUNTER] Minimum Daily ADX
+    adx_intraday_min: float = 23.0     # [HUNTER] Mandatory 15m ADX Trend Strength
     
     # Hunter Momentum Jump (Aggressiveness Filter)
-    momentum_jump: float = 2.0         # Must jump by +2.0 (CE) or -2.0 (PE) vs prev bar
+    momentum_jump: float = 1.0         # Must jump by +1.0 (CE) or -1.0 (PE) vs prev bar
     rsi_flow_required: bool = True     # RSI must be rising for CE, falling for PE
     
     # MACD Histogram Thresholds (Momentum Guards)
@@ -119,14 +118,13 @@ class TradingConfig:
     # Trading Mode
     live_trading: bool = True              # True = Live orders, False = Paper trading
     
-    # Dynamic TSL Ladder
+    # Dynamic TSL Ladder (Recovery Mode: Breathe & Run)
     tsl_ladder: List[Dict] = field(default_factory=lambda: [
-        {"threshold": 250.0, "lock": 150.0},
-        {"threshold": 350.0, "lock": 150.0},
-        {"threshold": 700.0, "lock": 500.0},
-        {"threshold": 1050.0, "lock": 750.0},
-        {"threshold": 1400.0, "lock": 1000.0},
-        {"threshold": 1750.0, "lock": 1250.0}
+        {"threshold": 500.0, "lock": 150.0},
+        {"threshold": 1000.0, "lock": 550.0},
+        {"threshold": 1800.0, "lock": 1300.0},
+        {"threshold": 3000.0, "lock": 2300.0},
+        {"threshold": 5000.0, "lock": 3800.0}
     ])
     
     # Strike Selection
@@ -220,7 +218,7 @@ class TradingConfig:
                 self.rsi_max = ind.get('rsi_max', self.rsi_max)
                 self.rsi_pe_min = ind.get('rsi_pe_min', self.rsi_pe_min)
                 self.rsi_pe_max = ind.get('rsi_pe_max', self.rsi_pe_max)
-                self.adx_min = ind.get('adx_min', self.adx_min)
+                self.adx_intraday_min = ind.get('adx_intraday_min', self.adx_intraday_min)
                 
             # Load daily win-lock settings
             if 'daily_win_lock' in config_data:
@@ -228,7 +226,7 @@ class TradingConfig:
                 self.win_lock_enabled = dwl.get('enabled', self.win_lock_enabled)
                 self.win_lock_step = dwl.get('step_amount', self.win_lock_step)
                 self.win_lock_floor_step = dwl.get('floor_step_amount', self.win_lock_floor_step)
-                self.adx_daily_min = ind.get('adx_daily_min', self.adx_daily_min)
+                pass
                 self.macd_fast = ind.get('macd_fast', self.macd_fast)
                 self.macd_slow = ind.get('macd_slow', self.macd_slow)
                 self.macd_signal = ind.get('macd_signal', self.macd_signal)

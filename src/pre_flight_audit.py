@@ -33,7 +33,7 @@ def run_audit():
     else: log.error("credentials.json not found")
 
     # [NEW] 1b. IP Verification (Rule 87)
-    registered_ip = "49.37.135.188"
+    registered_ip = "49.37.133.14"
     try:
         import requests
         curr_ip = requests.get("https://api.ipify.org", timeout=5).text
@@ -77,7 +77,7 @@ def run_audit():
             # VIX Verification
             if "if vix < self.config.vix_min_threshold:" in bot_code:
                 log.success("Entry: VIX Floor Check - ACTIVE")
-                rules['VIX Min'] = "10.0"
+                rules['VIX Min'] = "12.0"
             else: log.error("Entry: VIX Floor Check - MISSING")
             
             # RSI Verification
@@ -89,7 +89,7 @@ def run_audit():
             # Daily ADX Verification
             if "daily_adx <= self.config.adx_daily_min" in bot_code:
                 log.success("Entry: Daily ADX Trend Check - ACTIVE")
-                rules['Daily ADX Min'] = "30.0"
+                rules['Daily ADX Min'] = "22.0"
             else: log.error("Entry: Daily ADX Check - MISSING")
 
             # Win-Lock Logic (Rule 3)

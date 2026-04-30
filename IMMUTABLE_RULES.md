@@ -3,33 +3,43 @@
 This document is the **Single Source of Truth** for the FnO Trading Bot. 
 These rules are **HARDCODED** into the system logic and must NEVER be modified without explicit user authorization.
 
-## 1. Safety & Risk Guards (Hardcoded Defaults)
-- **1st Trade Hard SL**: **₹1,500**. If the first trade of the day hits this loss, exit immediately. (Rule 12.1)
-- **Global Win-Lock Floor**: **₹500 Step / ₹250 Floor**. 
-  - Every ₹500 in total daily profitReached, lock in ₹250 of that profit.
+## 1. Safety & Risk Guards (Recovery Mode)
+- **1st Trade Hard SL**: **₹2,000**. If the first trade of the day hits this loss, exit immediately. (Upgraded from ₹1,500)
+- **Global Win-Lock Floor**: **₹1,000 Step / ₹500 Floor** (Discrete Logic). 
+  - For every ₹1,000 in total daily profit reached, the system permanently locks in ₹500 of that profit.
 - **Safety Net**: **-50% Premium Loss**. Force exit if any option premium drops by 50% regardless of spot price.
-- **Daily Loss Limit**: **5% of Synchronized Capital**. Hard stop if daily P&L drops by 5% of the starting balance of the day (e.g., Rs 1,750 on 35k base).
+- **Daily Loss Limit**: **5% of Synchronized Capital**. Hard stop if daily P&L drops by 5% of the starting balance.
 
 ## 2. Entry Conditions (Standard Accuracy)
 - **RSI Ceiling (CE)**: **70.0** (Confirmed 2026-04-10)
 - **RSI Ceiling (PE)**: **70.0** (Confirmed 2026-04-10)
 - **MACD Histogram Jump (HUNTER)**: 
-  - CE: Must jump by **>= +2.0** vs previous 15m candle.
-  - PE: Must jump by **<= -2.0** vs previous 15m candle.
+  - CE: Must jump by **>= +1.0** vs previous 15m candle.
+  - PE: Must jump by **<= -1.0** vs previous 15m candle.
 - **RSI Flow (HUNTER)**: 
   - CE: RSI must be **RISING**.
   - PE: RSI must be **FALLING**.
-- **ADX Filter (HUNTER)**: **> 30** (Mandatory Daily ADX for trend strength).
+- **ADX Filter (INTRADAY TREND)**: **>= 23.0** on the **15-minute** timeframe. (Daily ADX requirement removed).
+- **VWAP Gate (DIRECTIONAL MASTER)**: 
+  - CE: Enter ONLY if Spot Price is **ABOVE** 15m VWAP.
+  - PE: Enter ONLY if Spot Price is **BELOW** 15m VWAP.
+  - [HARD-GATE]: Entry is BLOCKED if VWAP is unavailable (nan/0).
+  - Calculation: VWAP is anchored to the 15m timeframe using Future Proxy Volume for Indices.
+- **VIX Filter (VOLATILITY)**: **>= 12.0** (India VIX). Skip all trading if volatility is too low.
+- **Trading Window (TIME)**: 
+  - Start: **09:30 AM** (9:15 AM + 15m Morning Buffer).
+  - Cutoff: **03:15 PM** (No new entries after this time).
+  - Market Close: **03:30 PM**.
 
-## 3. Trailing Stop Loss (TSL) Ladder
-| Stage | Side | Trade P&L Reached | Locked Floor | Gap (Cushion) |
+## 3. Trailing Stop Loss (TSL) Ladder (Recovery Mode)
+| Stage | Description | Trade P&L Reached | Locked Floor | Gap (Breathing Room) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Stage 1** | **SAFE** | ₹250 | **₹100** | ₹150 |
-| **Stage 2** | **BREATH** | ₹350 | **₹150** | ₹200 |
-| **Stage 3** | **CORE** | ₹700 | **₹500** | ₹200 |
-| **Stage 4** | **ADV** | ₹1,050 | **₹750** | ₹300 |
-| **Stage 5** | **LOCK** | ₹1,400 | **₹1,000** | ₹400 |
-| **Stage 6** | **MAX** | ₹1,750 | **₹1,250** | ₹500 |
+| **Stage 1** | **BREATHE** | ₹500 | **₹150** | ₹350 |
+| **Stage 2** | **BANKER** | ₹1,000 | **₹550** | ₹450 |
+| **Stage 3** | **RUNNER** | ₹1,800 | **₹1,300** | ₹500 |
+| **Stage 4** | **EXPAND** | ₹3,000 | **₹2,300** | ₹700 |
+| **Stage 5** | **MOONSHOT** | ₹5,000 | **₹3,800** | ₹1,200 |
+| **Stage 6** | **TRAIL** | ₹7,000+ | **75% of Peak** | 25% of P&L |
 
 ## 4. Architectural Rules
 - **Polling Frequency**: **200ms (Turbo Mode)**.
@@ -84,18 +94,18 @@ These rules are **HARDCODED** into the system logic and must NEVER be modified w
 
 ---
 ## 8. Infrastructure & Connectivity
-- **Registered Public IP**: **`49.37.135.188`**. (Verified: 2026-04-22).
+- **Registered Public IP**: **`49.37.133.14`**. (Verified: 2026-04-27).
 - **Self-Correction**: If the bot detects an IP Mismatch, it MUST automatically output the current public IP for user portal update.
 
 ## 9. Indicator Integrity (Rule 74)
-- **Daily ADX Integrity**: Rule 22 (Daily ADX > 30) MUST be calculated exclusively on true 1-Day candle bars. 
+- **Daily ADX Integrity**: Rule 22 (Daily ADX >= 22.0) MUST be calculated exclusively on true 1-Day candle bars. 
   - If the Broker Daily API is stale, the bot MUST resample 1-minute data using a strict **'1D' frequency**. 
   - Using intraday frequencies (15m/60m) for Daily ADX is forbidden as it inflates trend strength.
 - **RSI Continuity (Rule 75)**: RSI must always use the research-verified Monday OHLC anchors (Monday April 20) in its lookback window to prevent "Historical Drift" after weekends.
-- **Indicator Precision (Rule 76 - NEW 2026-04-22)**: 
-  - **Lookback**: Minimum **250 bars** for Daily ADX stabilization.
-  - **Data Source Hierarchy**: The bot MUST prioritize **YFinance** (^NSEI, ^NSEBANK, ^BSESN) for Daily History (250 bars) due to divergent data in broker-specific historical APIs.
-  - **OHLC Synthesis**: Daily synthesis MUST use live `Open`, `High`, and `Low` from quotes injected into the historical backbone.
+  - **Indicator Precision (Rule 76)**: Minimum **250 bars** required for Daily ADX stabilization.
+  - **Titan-Shield Primary (Rule 97.1)**: The bot MUST bypass the broker's Daily Historical API for Indices and use **YFinance** as the primary source for the 250-bar Daily ADX backbone. 
+  - **Zero-Gap Injection**: The current Live LTP from the broker must be injected into the last YFinance bar to ensure real-time ADX precision without synthetic gaps.
+  - **Hard-Coded Priority**: This hierarchy is locked in `src/market_data.py` and `src/fno_trading_bot.py`.
 
 ## 10. Empowerment Recovery (Rule 80)
 - **April 21 Recovery**: Explicitly authorized override of the Daily Loss Limit (Rule 11) to allow recovery trading after the SENSEX SL hit. 
@@ -103,11 +113,17 @@ These rules are **HARDCODED** into the system logic and must NEVER be modified w
 
 ---
 ## 11. The Shield of Integrity (Rule 100)
-- **Unoverridable Hard-Gates**: Mandatory indicators (RSI, ADX > 30, MACD Jump) are HARD-CODED at the entry function's leading edge. No code logic, data synthesis, or emergency override can bypass these gates.
+- **Unoverridable Hard-Gates**: Mandatory indicators (VWAP Gate, RSI, 15m ADX >= 23.0, MACD Jump >= 1.0) are HARD-CODED at the entry function's leading edge.
+  - **VWAP Priority**: The 15m VWAP is the primary directional anchor. No CE entry below VWAP; no PE entry above VWAP.
 - **Twin-Gate Ground-Truth Sync**: Every trade entry MUST be preceded by a dual-source indicator check (mStock LTP vs YFinance LTP).
 - **Morning Audit (09:15 AM)**: The bot will perform a full comparison of the `config.json` vs. the `IMMUTABLE_RULES.md` and refuse to trade if a single numeric discrepancy exists.
 - **Textbook Persistence**: No configuration adjustment is valid unless it is first recorded in this Manifest.
 
 ---
-*Last Updated: 2026-04-22*
+## 12. Data Continuity & Synthesis Guards (Broker-Blind Failsafe)
+- **Volume Resilience**: When engaging fallback or gap-synthesis mechanisms, the system MUST enforce the existence of a 'volume' column (default to 0 if missing from the upstream source) before index-slicing. This guarantees zero `KeyError` crashes during indicator evaluation.
+- **NoneType Indicator Guards**: The entry loop MUST validate indicator states (`i_df` or `d_df`) and explicitly flush cache and safely `continue` the cycle if `None` is returned, completely neutralizing `TypeError` subscript exceptions.
+
+---
+*Last Updated: 2026-04-29*
 *Status: 100% SOUND-PROOFED*

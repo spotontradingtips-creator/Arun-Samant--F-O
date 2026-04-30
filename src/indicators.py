@@ -296,3 +296,41 @@ class TechnicalIndicators:
             return (not prev_bearish) and curr_bearish
         except Exception:
             return False
+
+    @staticmethod
+    def calculate_vwap(df: pd.DataFrame) -> pd.Series:
+        """
+        Calculate Intraday VWAP (Resets daily)
+        df must have 'high', 'low', 'close' columns and a datetime index.
+        If 'volume' is missing or all zeros, it falls back to a 
+        Cumulative Moving Average (CMA) as a Synthetic VWAP.
+        """
+        if df is None or df.empty:
+            return pd.Series()
+            
+        # Ensure index is datetime
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+            
+        # Group by date and calculate
+        # Typical Price = (H + L + C) / 3
+        tp = (df['high'] + df['low'] + df['close']) / 3
+        
+        # Check if volume is valid
+        volume = df.get('volume', pd.Series(0, index=df.index))
+        if volume.sum() == 0:
+            # [FAILOVER] Use Synthetic VWAP (Cumulative Moving Average of Price)
+            # This follows the same logic: "Is the price above today's average?"
+            volume = pd.Series(1, index=df.index)
+            
+        pv = tp * volume
+        
+        # Cumulative sums per day
+        tp_pv_cum = pv.groupby(df.index.date).cumsum()
+        vol_cum = volume.groupby(df.index.date).cumsum()
+        
+        # Prevent division by zero
+        vol_cum = vol_cum.replace(0, np.nan)
+        vwap = tp_pv_cum / vol_cum
+        
+        return vwap

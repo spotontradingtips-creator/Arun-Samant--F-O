@@ -263,15 +263,25 @@ class FnOTradingBot:
             return False
         # Condition 8: ADX filter removed per user update
 
-        # Condition 9: Daily ADX > 25
-        daily_row = daily_data.iloc[-1]
-        daily_adx = daily_row.get('ADX', 0)
-        if daily_adx <= self.config.adx_daily_min:
-            logger.info(f"{underlying} [CE]: Daily ADX Check Failed (Value: {daily_adx:.2f} | Min: {self.config.adx_daily_min})")
+        # Condition 9: 15m ADX Gate (Intraday Momentum Filter)
+        current_adx = current_row.get('ADX', 0)
+        if current_adx < self.config.adx_intraday_min:
+            logger.info(f"{underlying} [CE]: 15m ADX Check Failed (Value: {current_adx:.2f} | Min: {self.config.adx_intraday_min})")
+            return False
+        
+        # Condition 10: 15m VWAP Gate (Neural Manifest Stage 3) - [HARD-GATE]
+        # CE: Price must be ABOVE VWAP
+        vwap_val = current_row.get('VWAP', 0)
+        if vwap_val <= 0 or pd.isna(vwap_val):
+             logger.info(f"{underlying} [CE]: VWAP Gate Blocked (VWAP Missing/Invalid)")
+             return False
+             
+        if current_spot <= vwap_val:
+            logger.info(f"{underlying} [CE]: VWAP Gate Blocked (Spot: {current_spot:.2f} <= VWAP: {vwap_val:.2f})")
             return False
         
         # All conditions met!
-        logger.info(f"OK {underlying}: All CE entry conditions met | RSI={rsi:.2f} | Daily ADX={daily_adx:.2f} | VIX={vix:.2f}")
+        logger.info(f"OK {underlying}: All CE entry conditions met | RSI={rsi:.2f} | 15m ADX={current_adx:.2f} | VWAP={vwap_val:.2f}")
         return True
     
     def check_entry_conditions_pe(
@@ -406,15 +416,25 @@ class FnOTradingBot:
         if self.config.rsi_flow_required and rsi >= prev_rsi:
             logger.info(f"{underlying} [PE]: RSI Flow Check Failed (Value: {rsi:.2f} >= Prev: {prev_rsi:.2f})")
             return False
-        # Condition 9: Daily ADX > 25
-        daily_row = daily_data.iloc[-1]
-        daily_adx = daily_row.get('ADX', 0)
-        if daily_adx <= self.config.adx_daily_min:
-            logger.info(f"{underlying} [PE]: Daily ADX Check Failed (Value: {daily_adx:.2f} | Min: {self.config.adx_daily_min})")
+        # Condition 9: 15m ADX Gate (Intraday Momentum Filter)
+        current_adx = current_row.get('ADX', 0)
+        if current_adx < self.config.adx_intraday_min:
+            logger.info(f"{underlying} [PE]: 15m ADX Check Failed (Value: {current_adx:.2f} | Min: {self.config.adx_intraday_min})")
+            return False
+        
+        # Condition 10: 15m VWAP Gate (Neural Manifest Stage 3) - [HARD-GATE]
+        # PE: Price must be BELOW VWAP
+        vwap_val = current_row.get('VWAP', 0)
+        if vwap_val <= 0 or pd.isna(vwap_val):
+             logger.info(f"{underlying} [PE]: VWAP Gate Blocked (VWAP Missing/Invalid)")
+             return False
+             
+        if current_spot >= vwap_val:
+            logger.info(f"{underlying} [PE]: VWAP Gate Blocked (Spot: {current_spot:.2f} >= VWAP: {vwap_val:.2f})")
             return False
         
         # All conditions met!
-        logger.info(f"OK {underlying}: All PE entry conditions met | RSI={rsi:.2f} | Daily ADX={daily_adx:.2f} | VIX={vix:.2f}")
+        logger.info(f"OK {underlying}: All PE entry conditions met | RSI={rsi:.2f} | 15m ADX={current_adx:.2f} | VWAP={vwap_val:.2f}")
         return True
     
     def enter_trade(
@@ -552,7 +572,7 @@ Returns:
              logger.warning(f"SAFETY EXIT TRIGGERED: Premium P&L ({pnl_pct:.2f}%) exceeds max loss limit ({max_premium_loss}%)")
              return ExitReason.STOP_LOSS
 
-        # Priority 1: Stop Loss
+        # Priority 2: Stop Loss
         if position.check_sl_hit(current_underlying_price):
             return ExitReason.STOP_LOSS
             
@@ -572,7 +592,43 @@ Returns:
              logger.critical(f"DAILY LOSS LIMIT REACHED (Hard Stop): Total P&L (Rs {total_potential_pnl:.2f}) hits limit (Rs {loss_threshold:.2f})")
              return ExitReason.STOP_LOSS
         
-        # Priority 2: Profit Target
+        # Priority 2: DYNAMIC TSL LADDER (Rule 3)
+        # Per-trade trailing stop loss logic
+        trade_pnl = position.calculate_pnl(current_premium)
+        
+        # Update trade-level peak
+        if trade_pnl > position.max_pnl_reached:
+            position.max_pnl_reached = trade_pnl
+            
+        # Calculate Locked Floor based on Ladder
+        current_lock = 0.0
+        active_stage = None
+        
+        # Stages 1-5 (Static Thresholds)
+        for i, stage in enumerate(self.config.tsl_ladder):
+            if position.max_pnl_reached >= stage['threshold']:
+                current_lock = stage['lock']
+                active_stage = i + 1
+            else:
+                break
+        
+        # Stage 6+: Dynamic (75% of Peak for 7000+)
+        if position.max_pnl_reached >= 7000.0:
+            dynamic_lock = position.max_pnl_reached * 0.75
+            if dynamic_lock > current_lock:
+                current_lock = dynamic_lock
+                active_stage = 6
+        
+        if current_lock > 0:
+            # Prevent immediate exit if we just hit the threshold (Small buffer)
+            if trade_pnl <= current_lock:
+                logger.warning(f"DYNAMIC TSL TRIGGERED: {position.underlying} | P&L: Rs {trade_pnl:.2f} | Stage {active_stage} Lock: Rs {current_lock:.2f}")
+                return ExitReason.TRAILING_STOPLOSS
+            
+            # Defensive update to Position object for logging/transparency
+            position.dynamic_trailing_sl = current_lock
+
+        # Priority 2.2: Profit Target
         if position.check_profit_hit(current_premium, self.config.profit_target_amount):
             return ExitReason.PROFIT_TARGET
         
@@ -721,14 +777,14 @@ Returns:
     def get_win_lock_floor(self) -> float:
         """
         Calculate the Win-Lock Floor based on peak P&L.
-        Rule: Step 500, Floor 250.
+        Linked to config: Step (e.g. 1000), Floor (e.g. 500).
         """
-        if self.daily_max_pnl < 500:
+        if self.daily_max_pnl < self.config.win_lock_step:
             return 0.0
         
-        # Calculate how many 500-unit steps we've climbed
-        steps = int(self.daily_max_pnl / 500)
-        return steps * 250
+        # Calculate how many steps we've climbed
+        steps = int(self.daily_max_pnl / self.config.win_lock_step)
+        return steps * self.config.win_lock_floor_step
 
     def sync_daily_pnl(self, api):
         """

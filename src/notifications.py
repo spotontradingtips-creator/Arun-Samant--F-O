@@ -47,8 +47,9 @@ def _normalize_name(name: str) -> str:
 
 def notify_trade_entry(underlying: str, trade_type: str, premium: float, spot: float, strike: float, trailing_sl: float = 0.0):
     """Standardized entry alert with clean Phone-First UI"""
-    emoji = "🟢" if "CE" in trade_type.upper() else "🔴"
-    trade_name = "CALL (CE)" if "CE" in trade_type.upper() else "PUT (PE)"
+    is_ce = "CE" in trade_type.upper() or "CALL" in trade_type.upper()
+    emoji = "🟢" if is_ce else "🔴"
+    trade_name = "CALL (CE)" if is_ce else "PUT (PE)"
     clean_underlying = _normalize_name(underlying)
     
     msg = (

@@ -75,15 +75,16 @@
     "trading_hours": {
         "market_open": "09:15",
         "market_close": "15:30",
-        "entry_cutoff": "15:25"
+        "entry_cutoff": "15:15",
+        "first_trade_hard_loss_limit": 2000.0
     },
     "indicators": {
-        "vix_min_threshold": 10.0,
-        "rsi_min": 30.0,
+        "vix_min_threshold": 12.0,
+        "rsi_min": 35.0,
         "rsi_max": 70.0,
         "rsi_pe_min": 35.0,
         "rsi_pe_max": 70.0,
-        "adx_daily_min": 30.0,
+        "adx_intraday_min": 22.0,
         "macd_fast": 12,
         "macd_slow": 26,
         "macd_signal": 9,
@@ -93,16 +94,16 @@
     },
     "daily_win_lock": {
         "enabled": true,
-        "step_amount": 500.0,
-        "floor_step_amount": 250.0,
-        "comment": "Every 500 profit reached, lock in 250 floor. If profit drops to floor, exit current trade."
+        "step_amount": 1000.0,
+        "floor_step_amount": 500.0,
+        "comment": "Recovery Mode: Every 1000 profit reached, lock in 500 floor."
     },
     "tsl_ladder": [
-        {"threshold": 250.0, "lock": 100.0},
-        {"threshold": 350.0, "lock": 150.0},
-        {"threshold": 700.0, "lock": 500.0},
-        {"threshold": 1050.0, "lock": 750.0},
-        {"threshold": 1400.0, "lock": 1000.0},
-        {"threshold": 1750.0, "lock": 1250.0}
+        {"threshold": 500.0, "lock": 150.0},
+        {"threshold": 1000.0, "lock": 550.0},
+        {"threshold": 1800.0, "lock": 1300.0},
+        {"threshold": 3000.0, "lock": 2300.0},
+        {"threshold": 5000.0, "lock": 3800.0},
+        {"threshold": 7000.0, "lock": 5250.0}
     ]
 }

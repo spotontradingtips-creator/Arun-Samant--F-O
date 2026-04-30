@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 api_key = os.getenv('API_KEY')
 
-with open("c:/Antigravity/Arun Samant - F&O/credentials.json", "r") as f:
+with open("credentials.json", "r") as f:
     creds = json.load(f)
 access_token = creds.get("mstock", {}).get("access_token")
 
