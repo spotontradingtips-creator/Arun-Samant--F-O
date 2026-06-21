@@ -51,7 +51,7 @@ def wait_for_market_open():
             time.sleep(3600); continue
             
         now_t = now.time()
-        # [MANDATORY 9:30 AM START] Rule 7: 9:15 AM + 15m Buffer
+        # [MANDATORY 10:00 AM START] Rule 76: 9:15 AM + 45m Buffer
         market_start_dt = datetime.combine(now.date(), config.market_open).replace(tzinfo=now.tzinfo)
         effective_start_dt = market_start_dt + timedelta(minutes=config.morning_buffer_minutes)
         effective_start_time = effective_start_dt.time()
@@ -62,7 +62,7 @@ def wait_for_market_open():
             
         if now_t < effective_start_time:
             wait_secs = (effective_start_dt - now).total_seconds()
-            logger.info(f"Waiting for 9:30 AM Start (Rules). Sleeping for {int(wait_secs)}s...")
+            logger.info(f"Waiting for 10:00 AM Start (Rules). Sleeping for {int(wait_secs)}s...")
             time.sleep(min(wait_secs, 60) if wait_secs > 0 else 1)
         else:
             logger.info("Market closed for today.")
@@ -73,9 +73,14 @@ def get_market_data_with_indicators(api, symbol, exchange, token, name):
         quote = api.get_quote(symbol, exchange)
         spot = quote.get('last_price', 0) if quote else 0
         
-        d_df = api.get_historical_data(symbol, exchange, token, "day", days=250)
+        # [RULE 97.1] Titan-Shield Primary: Bypass Broker Daily History for Indices, use Hybrid/YFinance
+        if name in ["NIFTY", "BANKNIFTY", "SENSEX"]:
+            d_df, _ = api.get_hybrid_history(symbol, exchange, token, "1day", days=250)
+        else:
+            d_df = api.get_historical_data(symbol, exchange, token, "1day", days=250)
+            
         if d_df is None or len(d_df) < 250: 
-            logger.warning(f"[STABILITY] {symbol}: Insufficient Daily History ({len(d_df)}/250 bars). Stabilization Guard active.")
+            logger.warning(f"[STABILITY] {symbol}: Insufficient Daily History (Bars: {len(d_df) if d_df is not None else 0}/250). Stabilization Guard active.")
             return None, None, None, None, False, False
         
         d_df['MACD'], d_df['MACD_Signal'], d_df['MACD_Hist'] = TechnicalIndicators.calculate_macd(d_df['close'])
@@ -204,6 +209,8 @@ def exit_monitoring_loop(api, bot, order_manager, symbols_config):
                     opt = qs.get(pos.option_symbol, {}).get('last_price', 0) if pos.option_symbol else 0
                     if spot <= 0 or opt <= 0: continue
                     
+                    pos.last_pnl = pos.calculate_pnl(opt)
+                    
                     reason = None
                     if floor > 0 and (bot.daily_pnl + total_unrealized) <= floor:
                         reason = ExitReason.DAILY_WIN_LOCK
@@ -269,6 +276,8 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                     spot = all_qs.get(broker_sym, {}).get('last_price', 0)
                     if spot > 0:
                         logger.info(f"[DATA_GUARD] {broker_sym} | PRICE: {spot:.2f} | TIME: {now.strftime('%H:%M:%S')}")
+                    else:
+                        logger.info(f"[DATA_GUARD] {broker_sym} | PRICE: 0.00 | TIME: {now.strftime('%H:%M:%S')} (BLIND)")
                 entry_monitoring_loop.last_dg = time.time()
 
             for u, (exch, token, broker_sym) in symbols_config.items():
@@ -321,37 +330,38 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                                 i.loc[b_s, 'low'] = min(i.loc[b_s, 'low'], spot)
                             
                     # Complete indicator recalculation for accuracy (RSI/MACD strictly on 15m)
-                    i['MACD'], i['MACD_Signal'], i['MACD_Hist'] = TechnicalIndicators.calculate_macd(i['close'])
-                    i['RSI'] = TechnicalIndicators.calculate_rsi(i['close'])
-                    i['ADX'], i['+DI'], i['-DI'] = TechnicalIndicators.calculate_adx(i['high'], i['low'], i['close'])
-                    
-                    # [NEW] Recalculate VWAP for leading edge
-                    if 'volume' in i.columns:
-                        # Attempt to update volume from live Future quote if available
-                        f_info = SymbolMaster().future_tokens.get(name)
-                        if f_info:
-                            f_q = api.get_quote(f_info['token'], f_info['exch'])
-                            if f_q and f_q.get('volume'):
-                                # Approximate 15m volume (since broker gives cumulative daily volume)
-                                # We'll use the cumulative volume for VWAP calculation
-                                i.loc[b_s, 'volume'] = f_q['volume']
+                    if i is not None and not i.empty:
+                        i['MACD'], i['MACD_Signal'], i['MACD_Hist'] = TechnicalIndicators.calculate_macd(i['close'])
+                        i['RSI'] = TechnicalIndicators.calculate_rsi(i['close'])
+                        i['ADX'], i['+DI'], i['-DI'] = TechnicalIndicators.calculate_adx(i['high'], i['low'], i['close'])
                         
-                        i['VWAP'] = TechnicalIndicators.calculate_vwap(i)
+                        # [NEW] Recalculate VWAP for leading edge
+                        if 'volume' in i.columns:
+                            # Attempt to update volume from live Future quote if available
+                            f_info = SymbolMaster().future_tokens.get(name)
+                            if f_info:
+                                f_q = api.get_quote(f_info['token'], f_info['exch'])
+                                if f_q and f_q.get('volume'):
+                                    # Approximate 15m volume (since broker gives cumulative daily volume)
+                                    # We'll use the cumulative volume for VWAP calculation
+                                    i.loc[b_s, 'volume'] = f_q['volume']
+                            
+                            i['VWAP'] = TechnicalIndicators.calculate_vwap(i)
                         
-                        # [SAFETY] Explicitly block processing if indicators failed to load
-                        if d is None or i is None or i.empty: continue
+                    # [LOGIC TRANSPARENCY] Heartbeat (Rule: Explicit visibility every 60s)
+                    lg_timer = getattr(entry_monitoring_loop, "last_lg", {})
+                    if time.time() - lg_timer.get(u, 0) > 60:
+                        daily_adx = d.iloc[-1]['ADX'] if (d is not None and not d.empty and 'ADX' in d.columns) else 0
+                        rsi_15m = i.iloc[-1]['RSI'] if (i is not None and not i.empty and 'RSI' in i.columns) else 0
+                        vwap = i.iloc[-1].get('VWAP', 0) if (i is not None and not i.empty and 'VWAP' in i.columns) else 0
+                        hist = i.iloc[-1].get('MACD_Hist', 0) if (i is not None and not i.empty and 'MACD_Hist' in i.columns) else 0
                         
-                        # [LOGIC TRANSPARENCY] Heartbeat (Rule: Explicit visibility every 60s)
-                        lg_timer = getattr(entry_monitoring_loop, "last_lg", {})
-                        if time.time() - lg_timer.get(u, 0) > 60:
-                            daily_adx = d.iloc[-1]['ADX'] if not d.empty else 0
-                            rsi_15m = i.iloc[-1]['RSI'] if not i.empty else 0
-                            vwap = i.iloc[-1].get('VWAP', 0) if not i.empty else 0
-                            hist = i.iloc[-1].get('MACD_Hist', 0) if not i.empty else 0
-                            logger.info(f"[LOGIC_SNAPSHOT] {u:<10} | Price: {spot:<8.2f} | VWAP: {vwap:<8.2f} | RSI: {rsi_15m:<5.2f} | ADX: {daily_adx:<5.2f} | Hist: {hist:<5.2f}")
-                            lg_timer[u] = time.time()
-                            entry_monitoring_loop.last_lg = lg_timer
+                        status_msg = "OK" if (d is not None and i is not None and not i.empty) else "BLIND_DATA"
+                        logger.info(f"[LOGIC_SNAPSHOT] {u:<10} | Status: {status_msg:<10} | Price: {spot:<8.2f} | VWAP: {vwap:<8.2f} | RSI: {rsi_15m:<5.2f} | ADX: {daily_adx:<5.2f} | Hist: {hist:<5.2f}")
+                        lg_timer[u] = time.time()
+                        entry_monitoring_loop.last_lg = lg_timer
 
+                    # [SAFETY] Explicitly block processing if indicators failed to load
                     if d is None or i is None or i.empty: continue
                     idx = len(i) - 1
                     
@@ -367,9 +377,20 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                            else: continue
                         
                        p = bot.positions[underlying]
-                       quote = api.get_quote(broker_sym, exch)
-                       if bot.check_exit_conditions(p, p.entry_price, spot, idx, i) == ExitReason.MACD_REVERSAL:
-                           logger.info(f"[TURBO MACD EXIT] {name}")
+                       
+                       # Direct MACD reversal check (avoids false 0.00% P&L logging)
+                       check_idx = idx - 1
+                       macd_rev, di_rev = False, False
+                       if check_idx > 0:
+                           if p.trade_type == TradeType.CE:
+                               macd_rev = TechnicalIndicators.check_macd_crossover_bearish(i['MACD'], i['MACD_Signal'], check_idx)
+                               di_rev = TechnicalIndicators.check_di_crossover_bearish(i['+DI'], i['-DI'], check_idx)
+                           else:
+                               macd_rev = TechnicalIndicators.check_macd_crossover_bullish(i['MACD'], i['MACD_Signal'], check_idx)
+                               di_rev = TechnicalIndicators.check_di_crossover_bullish(i['+DI'], i['-DI'], check_idx)
+                               
+                       if macd_rev or di_rev:
+                           logger.info(f"[TURBO MACD EXIT] {name} - Trend Reversal CONFIRMED")
                            ex = "BFO" if "SENSEX" in name else "NFO"
                            pr = api.get_quote(p.option_symbol, ex).get('last_price', 0)
                            if config.live_trading: 

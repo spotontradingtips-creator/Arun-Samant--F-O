@@ -279,6 +279,13 @@ class FnOTradingBot:
         if current_spot <= vwap_val:
             logger.info(f"{underlying} [CE]: VWAP Gate Blocked (Spot: {current_spot:.2f} <= VWAP: {vwap_val:.2f})")
             return False
+            
+        # Condition 10b: VWAP Distance Guard (Mean Reversion Filter)
+        if hasattr(self.config, 'max_vwap_distance_pct'):
+            distance_pct = ((current_spot - vwap_val) / vwap_val) * 100
+            if distance_pct > self.config.max_vwap_distance_pct:
+                logger.info(f"{underlying} [CE]: VWAP Distance Guard Blocked (Spot: {current_spot:.2f} is {distance_pct:.2f}% > VWAP, Max allowed: {self.config.max_vwap_distance_pct}%)")
+                return False
         
         # All conditions met!
         logger.info(f"OK {underlying}: All CE entry conditions met | RSI={rsi:.2f} | 15m ADX={current_adx:.2f} | VWAP={vwap_val:.2f}")
@@ -432,6 +439,13 @@ class FnOTradingBot:
         if current_spot >= vwap_val:
             logger.info(f"{underlying} [PE]: VWAP Gate Blocked (Spot: {current_spot:.2f} >= VWAP: {vwap_val:.2f})")
             return False
+            
+        # Condition 10b: VWAP Distance Guard (Mean Reversion Filter)
+        if hasattr(self.config, 'max_vwap_distance_pct'):
+            distance_pct = ((vwap_val - current_spot) / vwap_val) * 100
+            if distance_pct > self.config.max_vwap_distance_pct:
+                logger.info(f"{underlying} [PE]: VWAP Distance Guard Blocked (Spot: {current_spot:.2f} is {distance_pct:.2f}% < VWAP, Max allowed: {self.config.max_vwap_distance_pct}%)")
+                return False
         
         # All conditions met!
         logger.info(f"OK {underlying}: All PE entry conditions met | RSI={rsi:.2f} | 15m ADX={current_adx:.2f} | VWAP={vwap_val:.2f}")
@@ -776,15 +790,25 @@ Returns:
                 
     def get_win_lock_floor(self) -> float:
         """
-        Calculate the Win-Lock Floor based on peak P&L.
-        Linked to config: Step (e.g. 1000), Floor (e.g. 500).
+        Calculate the Win-Lock Floor based on peak P&L using the dynamic ladder.
         """
-        if self.daily_max_pnl < self.config.win_lock_step:
+        if not self.config.win_lock_enabled or not getattr(self.config, 'win_lock_ladder', None):
             return 0.0
-        
-        # Calculate how many steps we've climbed
-        steps = int(self.daily_max_pnl / self.config.win_lock_step)
-        return steps * self.config.win_lock_floor_step
+            
+        current_lock = 0.0
+        for stage in self.config.win_lock_ladder:
+            if self.daily_max_pnl >= stage['threshold']:
+                current_lock = stage['lock']
+            else:
+                break
+                
+        # Optional: Add dynamic 80% lock for extreme runaway days above the ladder
+        if self.daily_max_pnl > 5000.0:
+            dynamic_lock = self.daily_max_pnl * 0.80
+            if dynamic_lock > current_lock:
+                current_lock = dynamic_lock
+                
+        return current_lock
 
     def sync_daily_pnl(self, api):
         """

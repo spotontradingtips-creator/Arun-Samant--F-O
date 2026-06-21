@@ -25,7 +25,7 @@ class TradingConfig:
     market_open: time = time(9, 15)    # 9:15 AM
     market_close: time = time(15, 30)  # 3:30 PM
     entry_cutoff: time = time(15, 15)  # 3:15 PM - no new entries after this
-    morning_buffer_minutes: int = 15   # 15 min buffer (start at 9:30 AM)
+    morning_buffer_minutes: int = 45   # 45 min buffer (start at 10:00 AM)
     
     # 1st Trade Safety Hard Limit
     first_trade_hard_loss_limit: float = 2000.0 # Exit 1st trade if loss exceeds this
@@ -64,11 +64,14 @@ class TradingConfig:
     max_premium_loss_percent: float = -50.0 # Force exit if premium drops by this %
     
     data_stability_threshold_pct: float = 0.10 # 0.1% max divergence (e.g. 23 pts for Nifty)
+    max_vwap_distance_pct: float = 0.25        # Block entry if spot is > 0.25% away from VWAP
     
     # Daily Win-Lock (Trailing SL on total daily P&L)
     win_lock_enabled: bool = True
-    win_lock_step: float = 1000.0
-    win_lock_floor_step: float = 500.0
+    win_lock_ladder: List[Dict] = field(default_factory=lambda: [
+        {"threshold": 500.0, "lock": 250.0},
+        {"threshold": 1000.0, "lock": 500.0}
+    ])
     
     # Technical Indicator Periods
     macd_fast: int = 12
@@ -219,14 +222,15 @@ class TradingConfig:
                 self.rsi_pe_min = ind.get('rsi_pe_min', self.rsi_pe_min)
                 self.rsi_pe_max = ind.get('rsi_pe_max', self.rsi_pe_max)
                 self.adx_intraday_min = ind.get('adx_intraday_min', self.adx_intraday_min)
+                self.max_vwap_distance_pct = ind.get('max_vwap_distance_pct', self.max_vwap_distance_pct)
                 
             # Load daily win-lock settings
             if 'daily_win_lock' in config_data:
                 dwl = config_data['daily_win_lock']
                 self.win_lock_enabled = dwl.get('enabled', self.win_lock_enabled)
-                self.win_lock_step = dwl.get('step_amount', self.win_lock_step)
-                self.win_lock_floor_step = dwl.get('floor_step_amount', self.win_lock_floor_step)
-                pass
+                if 'ladder' in dwl:
+                    self.win_lock_ladder = dwl['ladder']
+                    self.win_lock_ladder.sort(key=lambda x: x.get('threshold', 0))
                 self.macd_fast = ind.get('macd_fast', self.macd_fast)
                 self.macd_slow = ind.get('macd_slow', self.macd_slow)
                 self.macd_signal = ind.get('macd_signal', self.macd_signal)
@@ -305,10 +309,10 @@ class TradingConfig:
     def can_enter_new_position(self, current_time: time) -> bool:
         """
         Check if new positions can be entered, enforcing the 
-        mandatory 9:30 AM morning buffer (Rule 7).
+        mandatory 10:00 AM morning buffer (Rule 76).
         """
         import datetime
-        # Calculate effective start time (9:15 AM + 15 mins = 9:30 AM)
+        # Calculate effective start time (9:15 AM + 45 mins = 10:00 AM)
         base_datetime = datetime.datetime.combine(datetime.date.today(), self.market_open)
         effective_start_datetime = base_datetime + datetime.timedelta(minutes=self.morning_buffer_minutes)
         effective_start_time = effective_start_datetime.time()

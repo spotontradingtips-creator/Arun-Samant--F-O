@@ -13,7 +13,7 @@ All conditions checked **every 1 second**. **ALL must be TRUE** for a trade to e
 
 | # | Condition | Value | Notes |
 |---|-----------|-------|-------|
-| 1 | **Trading Hours** | 09:15 AM - 03:15 PM | No new entries after 3:15 PM |
+| 1 | **Trading Window:** | **10:00 AM - 3:15 PM** | Morning buffer strictly set to 45 mins to prevent 1st candle false signals |
 | 2 | **VIX Minimum** |  10.0 | Skip trading if VIX too low |
 | 3 | **No Duplicate Position** | Max 1 position per index | Cannot have multiple positions in same underlying |
 | 4 | **No Duplicate Signal** | Fresh crossover required | Won't re-enter on same candle |
@@ -238,22 +238,25 @@ P&L (%) = ((Exit Premium - Entry Premium) / Entry Premium)  100
   | Rs 1,400 | **Rs 1,000** | Rs 350 |
   
   **Hardened Resilence Logic**:
-  1. **Dual-Thread Sync**: P&L verification runs in a background thread to ensure zero latency in the monitoring loop.
-  2. **Safe-Startup Reset**: If the bot restarts and profit is already below the floor, it automatically resets the Peak to allow fresh trade management.
-  3. **Non-Stop Heartbeats**: Live P&L/Floor status is published every 60 seconds while trades are active.
- 
- ---
- 
- ##  RE-ENTRY LOGIC
+ ## 10. ENTRY CONDITIONS (MANDATORY SEQUENCE)
+Before ANY order is placed, ALL of the following must perfectly align in real-time. There are NO exceptions to this list.
 
-### First Trade of Day
-- **Relaxed Entry**: Enters if trend is active (MACD > Signal for CE, MACD < Signal for PE)
-- No fresh crossover required
-
-### Subsequent Trades (Same Day)
-- **Relaxed Entry**: Enters if trend is active (MACD > Signal for CE, MACD < Signal for PE)
-- **NO Fresh Crossover Needed** (per latest update)
-- **Anti-Duplication**: Still prevents re-entering the EXACT same strike.
+1. **Global Market Window**: Time must be exactly between **10:00 AM** and **3:15 PM** (IST). The first 45 minutes of the market (09:15-10:00) are heavily restricted to protect against "Morning Fakeouts".
+2. **Volatility Check**: India VIX must be **>= 12.0**.
+3. **Daily Loss Check**: Current Daily Loss must be **< 100%** of initial capital (Currently overridden for Live Phase. Was 5.0%).
+4. **Data Sync**: No duplicate open positions for the same underlying.
+5. **Fresh Data Only**: System cannot be in Synthesis/Blind Mode.
+6. **Smart Entry / MACD Trend**: 
+   - *First Trade*: Requires MACD Trend to be ACTIVE (CE: MACD > Signal. PE: MACD < Signal).
+   - *Subsequent Trades*: Requires MACD Trend to be ACTIVE. NO Fresh Crossover is required!
+7. **Hunter Logic (MACD Histogram)**: Explosive Momentum jump verified.
+8. **RSI Flow**: RSI must be in range (35-70) AND flowing in correct direction.
+9. **ADX Filter**: 15m ADX >= 22.0.
+10. **VWAP Directional Hard-Gate**: 
+    - CE: Spot must be **above** VWAP.
+    - PE: Spot must be **below** VWAP.
+11. **VWAP Rubber Band Guard (Mean Reversion)**: 
+    - Spot price cannot be more than **0.25%** away from the VWAP. If it is, the trade is blocked to prevent buying the absolute peak before a pullback.
 
 ---
 

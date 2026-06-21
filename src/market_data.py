@@ -24,8 +24,16 @@ logger = logging.getLogger(__name__)
 
 
 def is_index_symbol(symbol: str) -> bool:
-    """Helper to detect if a symbol or token is an Index"""
+    """Helper to detect if a symbol or token is an Index (and NOT an Option/Future)"""
     s = str(symbol).upper()
+    
+    # Exclude Option contracts (which contain Index names but end in CE/PE and have strikes)
+    if s.endswith("CE") or s.endswith("PE"):
+        return False
+    # Exclude Futures
+    if s.endswith("FUT"):
+        return False
+        
     return any(idx in s for idx in ["NIFTY", "SENSEX", "BANK", "INDEX", "VIX", "26000", "26009", "51", "26017"])
 
 class IPMismatchError(Exception):
@@ -546,15 +554,17 @@ class MStockAPI:
             "SENSEX": ["^BSESN", "SENSEX.BO", "BSESN.BO"] # Multi-ticker fallback for SENSEX
         }
         
-        if symbol in yf_symbols and timeframe == "15minute":
+        if symbol in yf_symbols and timeframe in ["15minute", "1day"]:
             is_calibrated = False # Default to false for major indices until verified
             try:
                 tickers_to_try = yf_symbols[symbol]
                 yf_ticker = tickers_to_try[0]
                 
                 # [NATIVE HISTORY UPGRADE] Fetch 60 days of True 15m context
-                # Confirmed: period="60d" returns 1400+ native bars, no interpolation needed.
-                yf_df = yf.download(yf_ticker, period="60d", interval="15m", progress=False, auto_adjust=False)
+                if timeframe == "1day":
+                    yf_df = yf.download(yf_ticker, period="300d", interval="1d", progress=False, auto_adjust=False)
+                else:
+                    yf_df = yf.download(yf_ticker, period="60d", interval="15m", progress=False, auto_adjust=False)
                 
                 if yf_df is not None and not yf_df.empty:
                     # Clean up yfinance columns (handle multi-index headers)
@@ -568,7 +578,8 @@ class MStockAPI:
                         yf_df.index = yf_df.index.tz_convert("Asia/Kolkata")
                     
                     is_calibrated = True
-                    yf_df = yf_df.between_time("09:15", "15:30")
+                    if timeframe != "1day":
+                        yf_df = yf_df.between_time("09:15", "15:30")
                     
                     if mstock_df is None or mstock_df.empty:
                         # [FAILOVER EMPOWERMENT] If mstock is 500-ing, allow trading on pure YFinance data

@@ -260,10 +260,26 @@ def sync_positions_from_broker(bot, api: MStockAPI) -> int:
                     continue
 
                 logger.warning(f"Position {underlying} found in State but CLOSED in Broker. Removing.")
+                
+                # Fetch LTP to avoid Zero-Price Bug
+                exit_premium = 0.0
+                if pos.option_symbol and api:
+                    opt_exchange = "BFO" if underlying == "SENSEX" else "NFO"
+                    try:
+                        opt_quote = api.get_quote(pos.option_symbol, opt_exchange)
+                        if opt_quote and opt_quote.get('last_price', 0.0) > 0:
+                            exit_premium = opt_quote.get('last_price')
+                    except Exception as e:
+                        logger.error(f"Failed to fetch LTP for sync exit: {e}")
+                
+                if exit_premium <= 0.0:
+                    # Fallback to entry price to avoid -100% loss corruption
+                    exit_premium = pos.entry_price
+
                 bot.exit_trade(
                     underlying=underlying,
-                    exit_price=0,      
-                    exit_underlying_price=0,
+                    exit_price=exit_premium,      
+                    exit_underlying_price=pos.entry_underlying_price,
                     exit_reason=ExitReason.BROKER_SYNC_EXIT
                 )
 
