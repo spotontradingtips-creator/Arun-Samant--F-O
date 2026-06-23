@@ -31,6 +31,90 @@ load_dotenv(ENV_FILE, override=True)
 # Initialize Logger (Isolated)
 logger = setup_logging(log_file="logs/dashboard.log")
 
+# ============================================================================
+# FEATURE 4: DATA SAFETY & AUDIT LOGGING
+# ============================================================================
+SESSION_TIMEOUT_MINUTES = 60  # Session expires after 1 hour of inactivity
+AUDIT_LOG_FILE = PROJECT_ROOT / 'logs' / 'dashboard_audit.log'
+
+def validate_input(value: str, field_type: str = 'text', min_length: int = 1) -> tuple[bool, str]:
+    """Validate user input at system boundaries (PRINCIPLE 4: SECURITY-FIRST)"""
+    if not isinstance(value, str):
+        return False, f"Invalid {field_type}: must be text"
+
+    if len(value) < min_length:
+        return False, f"Invalid {field_type}: minimum {min_length} characters required"
+
+    # Reject inputs with suspicious patterns
+    suspicious_patterns = ['<script', 'javascript:', 'onclick', 'onerror']
+    value_lower = value.lower()
+    for pattern in suspicious_patterns:
+        if pattern in value_lower:
+            return False, f"Invalid {field_type}: contains disallowed characters"
+
+    return True, "Valid"
+
+
+def log_audit_event(action: str, details: dict = None, level: str = 'INFO') -> None:
+    """Log security events without credential values (PRINCIPLE 4: SECURITY-FIRST)"""
+    if details is None:
+        details = {}
+
+    # Never log credential values - only field names
+    safe_details = {k: '***' if 'key' in k.lower() or 'secret' in k.lower() or 'password' in k.lower() else v
+                    for k, v in details.items()}
+
+    timestamp = datetime.now().isoformat()
+    audit_entry = {
+        'timestamp': timestamp,
+        'action': action,
+        'details': safe_details,
+        'level': level,
+    }
+
+    # Log to both logger and audit file
+    log_message = f"[AUDIT] {action} - {safe_details}"
+    if level == 'WARNING':
+        logger.warning(log_message)
+    elif level == 'ERROR':
+        logger.error(log_message)
+    else:
+        logger.info(log_message)
+
+    # Write to audit log file (for compliance)
+    try:
+        with open(AUDIT_LOG_FILE, 'a') as f:
+            f.write(f"{timestamp} | {action} | {safe_details}\n")
+    except Exception as e:
+        logger.error(f"Failed to write audit log: {str(e)}")
+
+
+def check_session_timeout() -> bool:
+    """Check if user session has timed out (no activity for SESSION_TIMEOUT_MINUTES)"""
+    if 'session_start' not in st.session_state:
+        st.session_state.session_start = datetime.now()
+        st.session_state.last_activity = datetime.now()
+        return False
+
+    # Update last activity on every page load (for inactivity tracking)
+    st.session_state.last_activity = datetime.now()
+
+    # Check inactivity timeout (time since last activity, not session start)
+    elapsed_minutes = (datetime.now() - st.session_state.last_activity).total_seconds() / 60
+    if elapsed_minutes > SESSION_TIMEOUT_MINUTES:
+        # Session expired due to inactivity
+        log_audit_event('SESSION_TIMEOUT', {'inactivity_minutes': int(elapsed_minutes)}, level='INFO')
+        return True
+
+    return False
+
+
+# Initialize audit logging
+try:
+    AUDIT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    logger.error(f"Failed to create audit log directory: {str(e)}")
+
 # FORCE DARK THEME AND WIDE LAYOUT
 st.set_page_config(
     page_title="SENTINEL HUB | F&O BOT", 
@@ -49,9 +133,23 @@ t = {
 }
 
 with st.sidebar:
+    # ============================================================================
+    # FEATURE 4: DATA SAFETY - Session Timeout Check
+    # ============================================================================
+    # Check session timeout on every page load
+    if check_session_timeout():
+        st.error("🔐 **SESSION EXPIRED** - Please refresh the page to continue")
+        st.stop()
+
     st.markdown("### SYSTEM")
     st.markdown("**MODE:** ULTRA_MINIMAL")
     st.markdown("---")
+
+    # Display session info in sidebar
+    if 'session_start' in st.session_state:
+        elapsed = (datetime.now() - st.session_state.session_start).total_seconds() / 60
+        session_text = f"Session: {int(elapsed)} min (timeout: {SESSION_TIMEOUT_MINUTES} min)"
+        st.caption(session_text)
 
     # ============================================================================
     # FEATURE 1: SETTINGS PANEL - Credential Management
@@ -89,11 +187,37 @@ with st.sidebar:
 
         # Save credentials button
         if st.button("💾 Save Credentials", key="save_creds"):
-            # Validate inputs
-            if not all([api_key_input, api_secret_input, client_code_input, password_input]):
-                st.error("❌ All fields are required!")
-            elif len(api_key_input) < 5 or len(api_secret_input) < 5 or len(client_code_input) < 1 or len(password_input) < 1:
-                st.error("❌ API key and secret must be at least 5 characters!")
+            # Validate all inputs (PRINCIPLE 4: SECURITY-FIRST)
+            validation_errors = []
+
+            # Validate API key
+            valid, msg = validate_input(api_key_input, 'API Key', min_length=5)
+            if not valid:
+                validation_errors.append(msg)
+
+            # Validate API secret
+            valid, msg = validate_input(api_secret_input, 'API Secret', min_length=5)
+            if not valid:
+                validation_errors.append(msg)
+
+            # Validate client code
+            valid, msg = validate_input(client_code_input, 'Client Code', min_length=1)
+            if not valid:
+                validation_errors.append(msg)
+
+            # Validate password
+            valid, msg = validate_input(password_input, 'Password', min_length=1)
+            if not valid:
+                validation_errors.append(msg)
+
+            if validation_errors:
+                for error in validation_errors:
+                    st.error(f"❌ {error}")
+                # Log validation failure (audit trail)
+                log_audit_event('SETTINGS_VALIDATION_FAILED', {
+                    'errors_count': len(validation_errors),
+                    'fields': 'api_key, api_secret, client_code, password'
+                }, level='WARNING')
             else:
                 # Save to .env file securely (using absolute path from module startup)
                 try:
@@ -109,8 +233,10 @@ PASSWORD={password_input}
                     # Note: On Windows, this is a no-op but doesn't error
                     os.chmod(ENV_FILE, 0o600)
 
-                    # Log update without plaintext (PRINCIPLE 4: SECURITY-FIRST)
-                    logger.info("[SETTINGS] API credentials updated successfully (no plaintext logged)")
+                    # Log update with audit trail (PRINCIPLE 4: SECURITY-FIRST)
+                    log_audit_event('CREDENTIALS_UPDATED', {
+                        'fields': 'api_key, api_secret, client_code, password'
+                    }, level='INFO')
 
                     # Warning for Windows users (file permissions not enforced on Windows)
                     if os.name == 'nt':
