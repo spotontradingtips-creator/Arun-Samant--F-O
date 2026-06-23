@@ -8,6 +8,7 @@ session_token*
 broker_auth*
 
 # Trading Bot Specific
+config.json
 config_live.json
 live_config.json
 account_secrets.json
