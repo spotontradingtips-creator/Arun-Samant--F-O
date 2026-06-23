@@ -1,12 +1,12 @@
 {
     "trading_mode": {
-        "live_trading": true,
+        "live_trading": false,
         "strike_depth": 0,
-        "comment": "Set to true for LIVE trading, false for paper trading. strike_depth: 0=ATM, 1=ITM1, 2=ITM2"
+        "comment": "Set to true for LIVE trading, false for paper trading. strike_depth: 0=ATM, 1=ITM1, 2=ITM2. ⚠️ SAFETY: Default is FALSE (paper trading)"
     },
     "capital": {
         "initial_capital": 28000.0,
-        "daily_loss_limit_percent": 100.0
+        "daily_loss_limit_percent": 5.0
     },
     "symbols": {
         "comment": "Phase 1: 4 Indices - NIFTY, BANKNIFTY, FINNIFTY, SENSEX",

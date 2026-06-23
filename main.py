@@ -278,7 +278,9 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                     vix_val = vix_quote.get('last_price', 15.0) if vix_quote else 15.0
                     notify_heartbeat("RUNNING", "Turbo Monitoring Active (200ms).", vix_val, bot.daily_trades)
                     last_hb = now.hour
-                except: pass
+                except Exception as e:
+                    # Bug #12 Fix: Log exceptions instead of silently swallowing them
+                    logger.debug(f"Heartbeat notification error: {e}")
 
             # 1. Fetch data for all symbols
             s_list = [(v[2], v[0]) for v in symbols_config.values()]
