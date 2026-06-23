@@ -1478,3 +1478,74 @@ class MStockAPI:
             logger.error(f"ERROR placing order: {e}")
             raise e
 
+    def get_order_status(self, order_id: str) -> Optional[Dict]:
+        """
+        Get order status from broker API
+
+        Parameters:
+        -----------
+        order_id : str
+            Broker order ID
+
+        Returns:
+        --------
+        Optional[Dict]
+            Order status dict with keys: status, filled_price, price, quantity_filled, etc.
+            Returns None if order not found or API error
+        """
+        if not order_id or order_id.startswith("PAPER_"):
+            # Paper mode orders don't have real status
+            return {
+                "status": "FILLED",
+                "filled_price": 0.0,
+                "price": 0.0,
+                "quantity_filled": 0
+            }
+
+        try:
+            # Type A API endpoint for order book/order status
+            url = f"{self.base_url}/orders"
+
+            headers = self.get_headers()
+
+            # Fetch all orders (broker doesn't have single order endpoint typically)
+            response = requests.get(url, headers=headers, timeout=(30, 60))
+
+            if response.status_code != 200:
+                logger.warning(f"Error fetching order status: HTTP {response.status_code}")
+                return None
+
+            data = response.json()
+
+            # Handle list or dict response
+            orders = []
+            if isinstance(data, list):
+                orders = data
+            elif isinstance(data, dict) and "data" in data:
+                orders = data.get("data", [])
+
+            # Find matching order
+            for order in orders:
+                if isinstance(order, dict):
+                    # Check different possible order ID field names
+                    if order.get("orderid") == order_id or order.get("order_id") == order_id:
+                        # Map broker status to standard status names
+                        broker_status = order.get("orderstatus", order.get("status", "")).upper()
+
+                        return {
+                            "status": broker_status,  # FILLED, REJECTED, CANCELLED, PENDING, etc.
+                            "filled_price": float(order.get("averageprice", order.get("filled_price", 0)) or 0),
+                            "price": float(order.get("price", 0) or 0),
+                            "quantity_filled": int(order.get("filledquantity", order.get("quantity_filled", 0)) or 0),
+                            "quantity": int(order.get("quantity", 0) or 0),
+                            "rejection_reason": order.get("rejectreason", "")
+                        }
+
+            # Order not found
+            logger.debug(f"Order {order_id} not found in broker order book")
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error getting order status: {e}")
+            return None
+
