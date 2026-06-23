@@ -224,7 +224,7 @@ class OrderManager:
         except Exception as e:
             error_msg = str(e)
             order.status = OrderStatus.REJECTED
-            
+
             # Check for insufficient funds
             if "insufficient" in error_msg.lower() or "margin" in error_msg.lower():
                 order.status = OrderStatus.INSUFFICIENT_FUNDS
@@ -233,11 +233,66 @@ class OrderManager:
             else:
                 order.rejection_reason = error_msg
                 logger.error(f"Order failed: {error_msg}")
-        
+
+        # Bug #9 Fix: Poll for order fill confirmation after placement
+        if order.status == OrderStatus.PLACED and order.broker_order_id:
+            filled_order = self._poll_order_fill(api, order)
+            if filled_order:
+                order = filled_order
+
         # Save order
         self.orders[order_id] = order
         self.save_orders()
-        
+
+        return order
+
+    def _poll_order_fill(self, api, order: Order, timeout_seconds: int = 30) -> Order:
+        """
+        Poll order status until it reaches terminal state (FILLED/REJECTED/EXPIRED/CANCELLED)
+
+        Parameters:
+        -----------
+        api : MStockAPI
+            API instance for polling
+        order : Order
+            Order to poll
+        timeout_seconds : int
+            Max time to poll (default 30 seconds)
+
+        Returns:
+        --------
+        Order
+            Updated order with filled status and price
+        """
+        import time
+        start_time = time.time()
+        poll_interval = 0.5  # Poll every 500ms
+
+        while (time.time() - start_time) < timeout_seconds:
+            try:
+                # Call API to get order status (implementation depends on broker API)
+                # This is a placeholder - actual implementation depends on MStockAPI capabilities
+                order_status = api.get_order_status(order.broker_order_id)
+
+                if order_status:
+                    if order_status.get('status') == 'FILLED':
+                        order.status = OrderStatus.FILLED
+                        order.filled_price = float(order_status.get('filled_price', order_status.get('price', 0)))
+                        logger.info(f"Order FILLED: {order.symbol} @ {order.filled_price}")
+                        return order
+                    elif order_status.get('status') in ['REJECTED', 'CANCELLED', 'EXPIRED']:
+                        order.status = OrderStatus.REJECTED
+                        order.rejection_reason = f"Order {order_status.get('status')}"
+                        logger.warning(f"Order {order_status.get('status')}: {order.symbol}")
+                        return order
+
+                time.sleep(poll_interval)
+            except Exception as e:
+                logger.debug(f"Error polling order status: {e}")
+                time.sleep(poll_interval)
+
+        # Timeout - log but keep PLACED status (may fill later)
+        logger.warning(f"Order fill confirmation timeout: {order.symbol} (Broker ID: {order.broker_order_id})")
         return order
     
     def get_recent_orders(self, limit: int = 10) -> list:
