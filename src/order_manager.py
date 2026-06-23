@@ -43,20 +43,29 @@ class Order:
 
 class OrderManager:
     """Manages order placement and tracking"""
-    
-    def __init__(self, live_mode: bool = True):
+
+    def __init__(self, config):
         """
         Initialize order manager
-        
+
         Parameters:
         -----------
-        live_mode : bool
-            If True, place real orders. If False, paper trading.
+        config : TradingConfig or bool
+            TradingConfig object (preferred) or bool for backwards compatibility.
+            If TradingConfig, live_mode is extracted from config.live_trading.
+            If bool, used directly as live_mode.
         """
-        self.live_mode = live_mode
+        # Bug #8 Fix: Properly extract live_trading flag from TradingConfig
+        if hasattr(config, 'live_trading'):
+            # config is a TradingConfig object
+            self.live_mode: bool = config.live_trading
+        else:
+            # Backwards compatibility: config is a bool
+            self.live_mode: bool = bool(config)
+
         self.orders: Dict[str, Order] = {}
         self.orders_file = "logs/orders_log.json"
-        
+
         # Load existing orders
         self.load_orders()
     

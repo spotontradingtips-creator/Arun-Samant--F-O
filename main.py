@@ -201,37 +201,52 @@ def exit_monitoring_loop(api, bot, order_manager, symbols_config):
 
             for u in active:
                 try:
+                    # Bug #2 Fix: Acquire lock for entire check-and-place-and-mutate sequence to prevent race conditions
                     with bot.lock:
                         pos = bot.positions.get(u)
-                        if not pos: continue
-                    
-                    spot = qs.get(u, {}).get('last_price', 0)
-                    opt = qs.get(pos.option_symbol, {}).get('last_price', 0) if pos.option_symbol else 0
-                    if spot <= 0 or opt <= 0: continue
-                    
-                    pos.last_pnl = pos.calculate_pnl(opt)
-                    
-                    reason = None
-                    if floor > 0 and (bot.daily_pnl + total_unrealized) <= floor:
-                        reason = ExitReason.DAILY_WIN_LOCK
-                    else:
-                        reason = bot.check_exit_conditions(pos, opt, spot, 0, None)
+                        if not pos:
+                            continue
 
+                        spot = qs.get(u, {}).get('last_price', 0)
+                        opt = qs.get(pos.option_symbol, {}).get('last_price', 0) if pos.option_symbol else 0
+                        if spot <= 0 or opt <= 0:
+                            continue
+
+                        pos.last_pnl = pos.calculate_pnl(opt)
+
+                        reason = None
+                        if floor > 0 and (bot.daily_pnl + total_unrealized) <= floor:
+                            reason = ExitReason.DAILY_WIN_LOCK
+                        else:
+                            # Bug #2: check_exit_conditions reads/writes position state (max_pnl_reached, dynamic_trailing_sl)
+                            # Must be called while holding lock to prevent torn reads/writes from concurrent entry thread
+                            reason = bot.check_exit_conditions(pos, opt, spot, 0, None)
+
+                    # Release lock before making API calls (place_order is I/O bound)
                     if reason:
                         logger.warning(f"[TURBO EXIT] {u} ({reason})")
+                        # Bug #1 Fix: Only call exit_trade if order is PLACED, not REJECTED
+                        order = None
                         if config.live_trading:
                             order_managers_ex = "BFO" if "SENSEX" in u else "NFO"
-                            order_manager.place_order(
-                                api=api, 
-                                symbol=pos.option_symbol, 
-                                underlying=u, 
-                                strike=pos.strike_price, 
+                            order = order_manager.place_order(
+                                api=api,
+                                symbol=pos.option_symbol,
+                                underlying=u,
+                                strike=pos.strike_price,
                                 option_type=pos.trade_type.value, # Corrected from p.option_type
                                 qty=pos.lot_size, # Corrected from p.qty
-                                side='SELL', 
+                                side='SELL',
                                 exchange=order_managers_ex
                             )
-                        bot.exit_trade(u, opt, spot, reason, api=api)
+
+                        # Only exit trade if order was successfully PLACED
+                        if order is None or order.status.value == "PLACED":
+                            with bot.lock:
+                                bot.exit_trade(u, opt, spot, reason, api=api)
+                        else:
+                            logger.error(f"[ORDER REJECTED] Exit order for {u} was rejected. Position retained for retry. Reason: {order.rejection_reason}")
+                            # Position remains in bot.positions for retry on next cycle
                 except Exception as inner_e:
                     logger.error(f"Error monitoring {u}: {inner_e}")
                     continue
@@ -244,8 +259,10 @@ def exit_monitoring_loop(api, bot, order_manager, symbols_config):
 def entry_monitoring_loop(api, bot, order_manager, symbols_config):
     from src.utils import normalize_symbol
     logger.info("ENTRY MONITORING THREAD STARTED (Turbo 200ms)")
-    cache = {} 
+    cache = {}
     last_hb = -1
+    # Bug #3 Fix: Track pending orders per symbol to prevent duplicate entries
+    order_pending = {}  # {symbol: True/False}
     
     while not shutdown_event.is_set():
         t0 = time.time()
@@ -408,25 +425,45 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                     
                     # Entry Check
                     elif name not in bot.positions:
+                        # Bug #3 Fix: Check if order is already pending for this symbol
+                        if order_pending.get(name, False):
+                            logger.debug(f"[DUPLICATE_GUARD] Entry order still pending for {name}. Skipping to prevent duplicate.")
+                            continue  # Skip if order already pending
+
+                        # Bug #5 Fix: Check daily loss limit before entering new position
+                        max_daily_loss = -(config.initial_capital * config.daily_loss_limit_percent / 100)
+                        if bot.daily_pnl <= max_daily_loss:
+                            logger.warning(f"[CIRCUIT BREAKER] Daily loss limit exceeded. Daily P&L: {bot.daily_pnl:.2f} vs Limit: {max_daily_loss:.2f}. No new entries allowed.")
+                            continue  # Skip entry for this symbol
+
                         tt = None
                         if bot.check_entry_conditions_ce(name, d, i, idx, vix, ok, spot, fresh): tt = TradeType.CE
                         elif bot.check_entry_conditions_pe(name, d, i, idx, vix, ok, spot, fresh): tt = TradeType.PE
-                        
+
                         if tt:
                             strk, osym = OptionSelector.select_option(name, spot, tt.value, depth=config.strike_depth)
                             ex = "BFO" if "SENSEX" in name else "NFO"
                             pr = api.get_quote(osym, ex).get('last_price', 0) or (spot * 0.015)
-                            
+
                             if config.live_trading:
-                                norm_name = normalize_symbol(name)
-                                qty = config.get_lot_size(norm_name)
-                                r = order_manager.place_order(
-                                    api=api, symbol=osym, underlying=name, strike=strk, 
-                                    option_type=tt.value, qty=qty, side='BUY', 
-                                    token=SymbolMaster().get_token(osym), exchange=ex
-                                )
-                                if r and r.status.value == 'PLACED': 
-                                    bot.enter_trade(name, tt, pr, spot, vix, idx, option_symbol=osym, strike_price=strk)
+                                # Bug #3: Set order_pending flag BEFORE placing order to block concurrent attempts
+                                order_pending[name] = True
+                                try:
+                                    norm_name = normalize_symbol(name)
+                                    qty = config.get_lot_size(norm_name)
+                                    r = order_manager.place_order(
+                                        api=api, symbol=osym, underlying=name, strike=strk,
+                                        option_type=tt.value, qty=qty, side='BUY',
+                                        token=SymbolMaster().get_token(osym), exchange=ex
+                                    )
+                                    if r and r.status.value == 'PLACED':
+                                        bot.enter_trade(name, tt, pr, spot, vix, idx, option_symbol=osym, strike_price=strk)
+                                    # Clear flag after order completes (success or failure)
+                                    order_pending[name] = False
+                                except Exception as e:
+                                    logger.error(f"Error placing entry order for {name}: {e}")
+                                    # Clear flag even on error to allow retry next cycle
+                                    order_pending[name] = False
                             else:
                                 bot.enter_trade(name, tt, pr, spot, vix, idx, option_symbol=osym, strike_price=strk)
                 except Exception as inner_e:

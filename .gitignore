@@ -1,0 +1,89 @@
+# Security: Credentials and Secrets
+credentials.json
+.env
+.env.local
+.env.*.local
+otp_response.txt
+session_token*
+broker_auth*
+
+# Trading Bot Specific
+config_live.json
+live_config.json
+account_secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Logs and Runtime
+logs/
+*.log
+*.log.*
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data and State
+daily_history.json
+trade_history.json
+position_state.json
+market_data_cache/
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project Specific
+*.tmp
+scratch/
+debug_*/
+test_*_output/
+
+# Never commit untracked secrets
+.aws/
+.gcp/
+.azure/
+
+# Backup files
+*.bak
+*.backup
+*.swp
+*~
+
+# IDE temp files
+.vscode/settings.json
+.idea/workspace.xml

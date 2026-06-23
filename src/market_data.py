@@ -83,17 +83,23 @@ class MStockAPI:
             logger.warning("credentials.json not found, will need to authenticate")
     
     def save_access_token(self, token: str):
-        """Save access token to credentials.json"""
+        """Save access token to credentials.json with restricted permissions"""
         try:
             with open("credentials.json", "r") as f:
                 creds = json.load(f)
         except FileNotFoundError:
             creds = {}
-        
+
         creds["mstock"] = {"access_token": token}
         with open("credentials.json", "w") as f:
             json.dump(creds, f, indent=2)
-        
+
+        # Bug #4 Fix: Restrict file permissions to owner read/write only
+        try:
+            os.chmod("credentials.json", 0o600)
+        except Exception as e:
+            logger.warning(f"Could not set file permissions: {e}")
+
         self.access_token = token
     
     def validate_connection(self) -> bool:
@@ -175,7 +181,9 @@ class MStockAPI:
             
             login_data = login_resp.json()
             if login_data.get("status") != "success":
-                logger.error(f"Login error: {login_data}")
+                # Bug #7 Fix: Log only message field, not full response (may contain credentials)
+                error_msg = login_data.get("message", "Unknown error")
+                logger.error(f"Login error: {error_msg}")
                 return False
             
             logger.info("Login initiated, OTP requested")
@@ -211,7 +219,9 @@ class MStockAPI:
             
             session_data = session_resp.json()
             if session_data.get("status") != "success":
-                logger.error(f"Session error: {session_data}")
+                # Bug #6 Fix: Log only message field, not full response (may contain tokens)
+                error_msg = session_data.get("message", "Unknown error")
+                logger.error(f"Session error: {error_msg}")
                 return False
             
             # Save access token
