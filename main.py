@@ -150,7 +150,23 @@ def get_market_data_with_indicators(api, symbol, exchange, token, name):
                 i_df['VWAP'] = 0
 
         is_fresh = api.last_fetch_freshness.get(symbol, False)
-        return d_df, i_df, spot, 15.0, stable, is_fresh
+
+        # Bug #13 Fix: Calculate actual historical volatility instead of hardcoded IV
+        # Historical volatility = annualized standard deviation of daily returns
+        try:
+            import numpy as np
+            daily_returns = np.log(d_df['close'] / d_df['close'].shift(1)).dropna()
+            if len(daily_returns) > 1:
+                # Annualize: std_dev * sqrt(252 trading days)
+                historical_vol = daily_returns.std() * np.sqrt(252)
+                iv = max(historical_vol * 100, 10.0)  # Convert to percentage, min 10% for safety
+            else:
+                iv = 15.0  # Fallback
+        except Exception as vol_e:
+            logger.debug(f"IV calculation error for {symbol}: {vol_e}, using fallback 15.0")
+            iv = 15.0
+
+        return d_df, i_df, spot, iv, stable, is_fresh
     except Exception as e:
         logger.error(f"Data Fetch Error ({symbol}): {e}")
         return None, None, None, None, False, False
