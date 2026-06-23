@@ -157,15 +157,16 @@ def sync_positions_from_broker(bot, api: MStockAPI) -> int:
                 import datetime
                 # Handle "10Feb2026"
                 expiry_dt = datetime.datetime.strptime(parts[1], "%d%b%Y")
-                
+
                 # Use SymbolMaster for robust normalization
                 from src.symbol_master import SymbolMaster
                 symbol_final = SymbolMaster().get_symbol(underlying, expiry_dt, strike_price, option_type)
-                
+
+                # Bug #20 Fix: Fail loudly if symbol normalization fails instead of silent fallback
                 if not symbol_final:
-                    # Final Fallback if SymbolMaster failed
-                    logger.warning(f"SymbolMaster could not resolve {underlying} {parts[1]}. Using raw symbol {symbol}")
-                    symbol_final = symbol
+                    logger.error(f"[SYMBOL_PARSE_FAILED] Cannot normalize: {underlying} {parts[1]} {strike_price} {option_type} (Raw: {symbol})")
+                    # Don't silently use raw symbol - skip this position to prevent quote failures
+                    continue
                 else:
                     logger.info(f"Normalized Symbol: {symbol_final} (from {symbol})")
                 
