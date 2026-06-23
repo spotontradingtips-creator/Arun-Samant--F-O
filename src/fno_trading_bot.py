@@ -518,9 +518,16 @@ Returns:
                 
             self.positions[underlying] = position
             self.daily_trades += 1
-            
-            # Persist state
-            StateManager.save_positions(self.positions)
+
+            # Bug #18 Fix: Persist state IMMEDIATELY and SYNCHRONOUSLY after mutations
+            try:
+                StateManager.save_positions(self.positions)
+                logger.debug(f"State persisted for {underlying}: Entry={entry_price:.2f}")
+            except Exception as e:
+                logger.error(f"[CRITICAL] Failed to persist state after enter_trade: {e}")
+                # Remove from positions on persistence failure
+                del self.positions[underlying]
+                raise
             
         logger.info(
             f"[bold green]ENTRY SUCCESSFUL:[/bold green] [cyan]{position_id}[/cyan] | "
@@ -749,10 +756,17 @@ Returns:
             # Move to closed positions
             self.closed_trades.append(position)
             del self.positions[underlying]
-            
-            # Persist state
-            StateManager.save_positions(self.positions)
-            StateManager.save_history(self.closed_trades)
+
+            # Bug #18 Fix: Persist state IMMEDIATELY and SYNCHRONOUSLY after mutations
+            # Ensure persistence succeeds before returning to prevent state loss on crash
+            try:
+                StateManager.save_positions(self.positions)
+                StateManager.save_history(self.closed_trades)
+                logger.debug(f"State persisted for {underlying}: PnL={position.pnl:.2f}")
+            except Exception as e:
+                logger.error(f"[CRITICAL] Failed to persist state after exit_trade: {e}")
+                # Don't fail silently - log this critical error for investigation
+                raise
             
             # [NEW] RESET & RE-CLIMB LOGIC
             # If we exited due to Win-Lock, we effectively "re-base" our peak
