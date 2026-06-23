@@ -65,23 +65,28 @@ def sync_positions_from_broker(bot, api: MStockAPI) -> int:
             # Convert list to dict format compatible with loop below
             # Structure: {(symbol, exchange): {'qty': qty, 'price': price, ...}}
             if positions_dict is None: positions_dict = {}
-            
+
             for pos in net_positions_list:
                 sym = pos.get('tradingsymbol')
                 exc = pos.get('exchange')
                 qty = pos.get('quantity', 0)
                 if qty == 0: qty = pos.get('netQuantity', 0) # Handle netQuantity
-                
+
                 if sym and exc:
                     positions_dict[(sym, exc)] = {
                         'qty': qty,
                         'price': pos.get('averagePrice', pos.get('avgPrice', 0.0)),
                         'ltp': pos.get('lastPrice', 0.0)
                     }
-            
+
         # Track which underlyings are active in broker
         broker_underlyings = set()
         synced_count = 0
+
+        # Bug #10 Fix: Bidirectional reconciliation
+        # Detect ORPHANED positions (in broker but not in bot) indicating failed exits
+        broker_positions_keys = set(positions_dict.keys()) if positions_dict else set()
+        logger.debug(f"Broker positions: {len(broker_positions_keys)}, Bot positions: {len(bot.positions)}")
         
         # Process the positions dictionary
         for (symbol, exchange), pos_data in positions_dict.items():
@@ -291,7 +296,29 @@ def sync_positions_from_broker(bot, api: MStockAPI) -> int:
             
         # MANDATORY: Sync realized P&L to ensure Win-Lock is accurate
         bot.sync_daily_pnl(api)
-            
+
+        # Bug #10 Fix: BIDIRECTIONAL reconciliation - detect ORPHANED positions
+        # Orphaned positions = in broker but not in bot (indicates failed exit order)
+        if positions_dict and bot.positions:
+            # Find positions in broker that aren't in bot (orphans from failed exits)
+            reconciliation_log = []
+            for (broker_symbol, exchange), _ in positions_dict.items():
+                # Check if any bot position matches this broker position
+                found = False
+                for underlying, pos in bot.positions.items():
+                    if pos.option_symbol and pos.option_symbol.upper() in broker_symbol.upper():
+                        found = True
+                        break
+                if not found:
+                    # ORPHANED POSITION DETECTED
+                    reconciliation_log.append(broker_symbol)
+
+            if reconciliation_log:
+                logger.warning(f"[ORPHANED POSITIONS] Detected {len(reconciliation_log)} positions in broker not tracked by bot!")
+                logger.warning(f"Orphans: {reconciliation_log}")
+                logger.warning("These positions likely indicate FAILED EXIT ORDERS from earlier sessions.")
+                logger.warning("ACTION REQUIRED: Manually close these positions or investigate exit failures.")
+
         return synced_count
         
     except Exception as e:

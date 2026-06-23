@@ -550,7 +550,12 @@ def run_live_trading():
         notify_system_status(is_online=True)
         
         bot = FnOTradingBot(config, api=api); order_manager = OrderManager(config)
-        
+
+        # Bug #21 Fix: Start external watchdog for process monitoring
+        from src.external_watchdog import get_external_watchdog
+        external_watchdog = get_external_watchdog()
+        external_watchdog.start()
+
         # [MANDATORY] Capital Sync (Rule 15)
         try:
             live_funds = api.get_funds()
@@ -617,6 +622,11 @@ def run_live_trading():
     except KeyboardInterrupt: shutdown_event.set()
     finally:
         shutdown_event.set()
+        # Bug #21 Fix: Stop external watchdog on shutdown
+        try:
+            external_watchdog.stop()
+        except:
+            pass  # Watchdog may not have been started
         # Ensure threads have time to clean up if joined
 
 if __name__ == "__main__":
