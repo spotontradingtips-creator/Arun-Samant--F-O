@@ -145,6 +145,106 @@ PASSWORD={password_input}
 
     st.markdown("---")
 
+    # ============================================================================
+    # FEATURE 2: PAPER/LIVE MODE TOGGLE
+    # ============================================================================
+    st.markdown("### 🎯 TRADING MODE")
+
+    # Load current mode from config.json (cached in session_state)
+    CONFIG_FILE = PROJECT_ROOT / 'config.json'
+
+    # Initialize session state for mode (prevents disk read on every rerun)
+    if 'current_mode' not in st.session_state:
+        current_mode = 'paper'  # Default to paper mode
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+                    current_mode = 'live' if config.get('live_trading', False) else 'paper'
+                st.session_state.current_mode = current_mode
+            except Exception as e:
+                logger.error(f"[MODE] Error reading config: {str(e)}")
+                st.warning("⚠️ Could not read saved mode. Using default (Paper).")
+                st.session_state.current_mode = 'paper'
+        else:
+            st.session_state.current_mode = 'paper'
+
+    current_mode = st.session_state.current_mode
+
+    # Mode selection dropdown
+    mode_options = {
+        '📄 PAPER MODE - Simulated Trading (No Real Money)': 'paper',
+        '🔴 LIVE MODE - Real Money Trading (Use Caution!)': 'live'
+    }
+
+    selected_mode_text = next(
+        (k for k, v in mode_options.items() if v == current_mode),
+        list(mode_options.keys())[0]
+    )
+
+    selected_mode_text = st.radio(
+        "Select trading mode:",
+        options=list(mode_options.keys()),
+        index=list(mode_options.keys()).index(selected_mode_text) if selected_mode_text in mode_options else 0,
+        key="mode_selector"
+    )
+
+    selected_mode = mode_options[selected_mode_text]
+
+    # Save mode if changed
+    if selected_mode != current_mode:
+        try:
+            # Load existing config or create new
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+            else:
+                config = {}
+
+            # Update live_trading setting
+            config['live_trading'] = (selected_mode == 'live')
+
+            # Save updated config atomically (write to temp, then replace)
+            import tempfile
+            with tempfile.NamedTemporaryFile(
+                'w',
+                dir=CONFIG_FILE.parent,
+                delete=False,
+                suffix='.tmp',
+                encoding='utf-8'
+            ) as tmp_file:
+                json.dump(config, tmp_file, indent=2)
+                tmp_path = Path(tmp_file.name)
+
+            # Atomic replace (POSIX atomic, near-atomic on Windows)
+            tmp_path.replace(CONFIG_FILE)
+
+            # Update session state to prevent re-reading
+            st.session_state.current_mode = selected_mode
+
+            # Log mode change safely (PRINCIPLE 4: SECURITY-FIRST)
+            logger.info(f"[MODE] Trading mode changed to {selected_mode.upper()} (no sensitive data logged)")
+
+            # Show notification after rerun
+            st.session_state.mode_changed = True
+            if selected_mode == 'live':
+                st.session_state.mode_message = "⚠️ **LIVE MODE ENABLED** - Real money at risk! Monitor your positions carefully."
+            else:
+                st.session_state.mode_message = "✅ Paper mode - simulated trading only"
+
+            st.rerun()
+        except Exception as e:
+            logger.error(f"[MODE] Error saving mode: {str(e)}")
+            st.error(f"❌ Error saving mode: {str(e)}")
+
+    st.markdown("---")
+
+    # Display current mode status
+    mode_display = f"**Current Mode:** {'🔴 LIVE (REAL MONEY)' if current_mode == 'live' else '📄 PAPER (SIMULATION)'}"
+    st.markdown(mode_display)
+
+    st.markdown("---")
+
 # DYNAMIC MINIMALIST CSS
 st.markdown(f"""
 <style>
