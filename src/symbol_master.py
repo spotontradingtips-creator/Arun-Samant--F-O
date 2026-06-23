@@ -4,16 +4,24 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
 class SymbolMaster:
+    """Thread-safe singleton for managing trading symbol master data"""
+
     _instance = None
+    _lock = threading.Lock()
 
     def __new__(cls):
+        # Double-checked locking pattern for thread-safe singleton
         if cls._instance is None:
-            cls._instance = super(SymbolMaster, cls).__new__(cls)
-            cls._instance.initialized = False
+            with cls._lock:
+                # Check again inside the lock
+                if cls._instance is None:
+                    cls._instance = super(SymbolMaster, cls).__new__(cls)
+                    cls._instance.initialized = False
         return cls._instance
 
     def __init__(self):
