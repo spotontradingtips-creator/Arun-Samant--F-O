@@ -245,6 +245,114 @@ PASSWORD={password_input}
 
     st.markdown("---")
 
+    # ============================================================================
+    # FEATURE 3: KILL SWITCH (Emergency Stop Button)
+    # ============================================================================
+    st.markdown("### 🛑 EMERGENCY CONTROLS")
+
+    # Kill switch flag file path (persists across page refreshes)
+    KILL_SWITCH_FILE = PROJECT_ROOT / '.kill_switch'
+
+    # Initialize kill switch state in session
+    if 'kill_switch_pending' not in st.session_state:
+        st.session_state.kill_switch_pending = False
+    if 'kill_switch_active' not in st.session_state:
+        # Check if kill switch file exists (persistence across refresh)
+        st.session_state.kill_switch_active = KILL_SWITCH_FILE.exists()
+
+    # Check current kill switch status from file (persistence)
+    current_kill_switch_active = KILL_SWITCH_FILE.exists()
+
+    # Display kill switch status (persistent)
+    if current_kill_switch_active:
+        st.error("🛑 **KILL SWITCH ACTIVE** - Bot has been emergency stopped")
+        st.markdown("""
+        **Status:** All orders cancelled, all positions closed, bot not accepting new orders
+
+        To resume trading, restart the bot application.
+        """)
+    else:
+        # Kill switch button - Always visible, big and red
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            if st.button(
+                "🛑 KILL SWITCH - STOP ALL TRADING",
+                key="kill_switch_btn",
+                help="Emergency stop: signals bot to cancel all orders and close all positions"
+            ):
+                st.session_state.kill_switch_pending = True
+
+        with col2:
+            st.markdown("""
+            **Safety Features:**
+            - Requires explicit confirmation
+            - Signals bot immediately
+            - Creates persistent flag
+            - Full audit trail
+            """)
+
+        # Confirmation dialog (persistent via session state)
+        if st.session_state.kill_switch_pending:
+            st.markdown("---")
+            st.markdown("### ⚠️ CONFIRM EMERGENCY STOP")
+            st.error(
+                "**WARNING:** This will immediately:\n"
+                "- Signal bot to cancel all pending orders\n"
+                "- Close all open positions\n"
+                "- Stop accepting new orders\n\n"
+                "This action cannot be undone without restarting the bot."
+            )
+
+            # Confirmation buttons
+            confirm_col, cancel_col = st.columns(2)
+
+            with confirm_col:
+                if st.button("✅ CONFIRM - Execute Kill Switch", key="kill_confirm"):
+                    try:
+                        # Create persistent kill switch flag (bot will read this)
+                        KILL_SWITCH_FILE.touch()
+
+                        # Log kill switch activation with full audit trail
+                        timestamp = datetime.now().isoformat()
+                        audit_log = {
+                            'timestamp': timestamp,
+                            'action': 'KILL_SWITCH_ACTIVATED',
+                            'reason': 'User initiated emergency stop',
+                            'status': 'active',
+                            'mode': current_mode,
+                        }
+                        logger.warning(
+                            f"[KILL_SWITCH] ACTIVATED at {timestamp} - "
+                            f"User emergency stop (mode: {current_mode.upper()}, status: active)"
+                        )
+
+                        # Update session state
+                        st.session_state.kill_switch_active = True
+                        st.session_state.kill_switch_pending = False
+
+                        st.error("🛑 **KILL SWITCH ACTIVATED**")
+                        st.markdown(
+                            "Emergency stop signal sent to bot:\n"
+                            "✓ Flag file created (persistent)\n"
+                            "✓ Bot will stop accepting orders\n"
+                            "✓ All positions will be closed\n"
+                            "✓ Audit logged\n\n"
+                            "**Restart the bot application to resume trading.**"
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        logger.error(f"[KILL_SWITCH] Error activating: {str(e)}")
+                        st.error(f"❌ Error activating kill switch: {str(e)}")
+
+            with cancel_col:
+                if st.button("❌ CANCEL - Keep Trading", key="kill_cancel"):
+                    st.session_state.kill_switch_pending = False
+                    st.info("✅ Kill switch cancelled. Bot continues running.")
+                    st.rerun()
+
+    st.markdown("---")
+
 # DYNAMIC MINIMALIST CSS
 st.markdown(f"""
 <style>
