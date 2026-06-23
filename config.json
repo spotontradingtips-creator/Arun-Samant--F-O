@@ -1,0 +1,121 @@
+{
+    "trading_mode": {
+        "live_trading": true,
+        "strike_depth": 0,
+        "comment": "Set to true for LIVE trading, false for paper trading. strike_depth: 0=ATM, 1=ITM1, 2=ITM2"
+    },
+    "capital": {
+        "initial_capital": 28000.0,
+        "daily_loss_limit_percent": 100.0
+    },
+    "symbols": {
+        "comment": "Phase 1: 4 Indices - NIFTY, BANKNIFTY, FINNIFTY, SENSEX",
+        "NIFTY": {
+            "exchange": "NSE",
+            "token": "26000",
+            "key": "NIFTY"
+        },
+        "BANKNIFTY": {
+            "exchange": "NSE",
+            "token": "26009",
+            "key": "BANKNIFTY"
+        },
+        "SENSEX": {
+            "exchange": "BSE",
+            "token": "51",
+            "key": "SENSEX"
+        }
+    },
+    "stop_loss": {
+        "comment": "Stop loss based on UNDERLYING SPOT MOVEMENT (not premium). Safety Net uses premium.",
+        "max_premium_loss_percent": -50.0,
+        "NIFTY": {
+            "base_sl_percent": 0.7,
+            "vix_adjustments": {
+                "vix_12_15": 0.7,
+                "vix_15_20": 0.75,
+                "vix_above_20": 0.8
+            }
+        },
+        "BANKNIFTY": {
+            "base_sl_percent": 1.2,
+            "vix_adjustments": {
+                "vix_12_15": 1.2,
+                "vix_15_20": 1.25,
+                "vix_above_20": 1.5
+            }
+        },
+        "SENSEX": {
+            "base_sl_percent": 1.0,
+            "vix_adjustments": {
+                "vix_12_15": 1.0,
+                "vix_15_20": 1.25,
+                "vix_above_20": 1.5
+            }
+        }
+    },
+    "profit_targets": {
+        "comment": "Profit target based on AMOUNT in Rs (editable)",
+        "profit_target_amount": 2000.0
+    },
+    "lot_sizes": {
+        "NIFTY": {
+            "lot_size": 65,
+            "num_lots": 1
+        },
+        "BANKNIFTY": {
+            "lot_size": 30,
+            "num_lots": 1
+        },
+        "SENSEX": {
+            "lot_size": 20,
+            "num_lots": 1
+        }
+    },
+    "trading_hours": {
+        "market_open": "09:15",
+        "market_close": "15:30",
+        "entry_cutoff": "15:15",
+        "first_trade_hard_loss_limit": 2000.0,
+        "morning_buffer_minutes": 45
+    },
+    "indicators": {
+        "vix_min_threshold": 12.0,
+        "rsi_min": 35.0,
+        "rsi_max": 70.0,
+        "rsi_pe_min": 35.0,
+        "rsi_pe_max": 70.0,
+        "adx_intraday_min": 22.0,
+        "max_vwap_distance_pct": 0.25,
+        "macd_fast": 12,
+        "macd_slow": 26,
+        "macd_signal": 9,
+        "rsi_period": 14,
+        "adx_period": 14,
+        "data_stability_threshold_pct": 0.10
+    },
+    "daily_win_lock": {
+        "enabled": true,
+        "ladder": [
+            {"threshold": 500.0, "lock": 250.0},
+            {"threshold": 1000.0, "lock": 500.0},
+            {"threshold": 1500.0, "lock": 1000.0},
+            {"threshold": 1800.0, "lock": 1300.0},
+            {"threshold": 2000.0, "lock": 1500.0},
+            {"threshold": 2250.0, "lock": 1750.0},
+            {"threshold": 2500.0, "lock": 2000.0},
+            {"threshold": 3000.0, "lock": 2300.0},
+            {"threshold": 4000.0, "lock": 3200.0},
+            {"threshold": 5000.0, "lock": 4000.0}
+        ],
+        "comment": "Dynamic daily win-lock ladder tracking portfolio peak profit"
+    },
+    "tsl_ladder": [
+        {"threshold": 500.0, "lock": 150.0},
+        {"threshold": 1000.0, "lock": 550.0},
+        {"threshold": 1800.0, "lock": 1300.0},
+        {"threshold": 3000.0, "lock": 2300.0},
+        {"threshold": 5000.0, "lock": 3800.0},
+        {"threshold": 7000.0, "lock": 5250.0}
+    ]
+}
