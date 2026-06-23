@@ -115,7 +115,7 @@ def get_market_data_with_indicators(api, symbol, exchange, token, name):
 
         # [NEW] VWAP Implementation (Futures Volume Proxy)
         # 1. Fetch volume from front-month Future (Spot indices have 0 volume)
-        f_info = SymbolMaster().future_tokens.get(name)
+        f_info = symbol_master.future_tokens.get(name)
         if f_info:
             future_token = f_info['token']
             future_exch = f_info['exch']
@@ -171,7 +171,7 @@ def get_market_data_with_indicators(api, symbol, exchange, token, name):
         logger.error(f"Data Fetch Error ({symbol}): {e}")
         return None, None, None, None, False, False
 
-def exit_monitoring_loop(api, bot, order_manager, symbols_config):
+def exit_monitoring_loop(api, bot, order_manager, symbols_config, symbol_master):
     logger.info("EXIT MONITORING THREAD STARTED (Turbo 200ms)")
     last_sync = time.time()
     
@@ -272,7 +272,7 @@ def exit_monitoring_loop(api, bot, order_manager, symbols_config):
         except Exception as e:
             logger.error(f"EXIT THREAD ERROR: {e}"); time.sleep(1)
 
-def entry_monitoring_loop(api, bot, order_manager, symbols_config):
+def entry_monitoring_loop(api, bot, order_manager, symbols_config, symbol_master):
     from src.utils import normalize_symbol
     logger.info("ENTRY MONITORING THREAD STARTED (Turbo 200ms)")
     cache = {}
@@ -373,7 +373,7 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                         # [NEW] Recalculate VWAP for leading edge
                         if 'volume' in i.columns:
                             # Attempt to update volume from live Future quote if available
-                            f_info = SymbolMaster().future_tokens.get(name)
+                            f_info = symbol_master.future_tokens.get(name)
                             if f_info:
                                 f_q = api.get_quote(f_info['token'], f_info['exch'])
                                 if f_q and f_q.get('volume'):
@@ -472,7 +472,7 @@ def entry_monitoring_loop(api, bot, order_manager, symbols_config):
                                     r = order_manager.place_order(
                                         api=api, symbol=osym, underlying=name, strike=strk,
                                         option_type=tt.value, qty=qty, side='BUY',
-                                        token=SymbolMaster().get_token(osym), exchange=ex
+                                        token=symbol_master.get_token(osym), exchange=ex
                                     )
                                     if r and r.status.value == 'PLACED':
                                         bot.enter_trade(name, tt, pr, spot, vix, idx, option_symbol=osym, strike_price=strk)
@@ -570,9 +570,12 @@ def run_live_trading():
         
         wait_for_market_open()
         sync_positions_from_broker(bot, api)
-        
-        ex_t = threading.Thread(target=exit_monitoring_loop, args=(api, bot, order_manager, symbols_config), name="ExitT", daemon=True)
-        en_t = threading.Thread(target=entry_monitoring_loop, args=(api, bot, order_manager, symbols_config), name="EntryT", daemon=True)
+
+        # Bug #11 Fix: Create SymbolMaster ONCE at startup instead of 1000s of times in hot path
+        symbol_master = SymbolMaster()
+
+        ex_t = threading.Thread(target=exit_monitoring_loop, args=(api, bot, order_manager, symbols_config, symbol_master), name="ExitT", daemon=True)
+        en_t = threading.Thread(target=entry_monitoring_loop, args=(api, bot, order_manager, symbols_config, symbol_master), name="EntryT", daemon=True)
         bg_t = threading.Thread(target=background_sync_loop, args=(api, bot), name="SyncT", daemon=True)
         
         ex_t.start(); en_t.start(); bg_t.start()
