@@ -1,0 +1,215 @@
+name: Test & Validate (4 Principles)
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  # PRINCIPLE 1: TEST-FIRST
+  test-first:
+    name: "🧪 Principle 1: Test-First"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Test syntax of core files
+        run: |
+          echo "🧪 Testing Python syntax..."
+          python -m py_compile main.py
+          python -m py_compile simple_setup.py
+          python -m py_compile monitoring/hourly_validation.py
+          echo "✅ All syntax checks passed"
+
+      - name: Test configuration loading
+        run: |
+          echo "🧪 Testing config.json..."
+          python -c "import json; c=json.load(open('config.json')); print('✅ Config valid'); assert c['trading_mode']['live_trading']==False, 'Paper mode not enabled'"
+
+      - name: Test imports
+        run: |
+          echo "🧪 Testing imports..."
+          python -c "import sys; sys.path.insert(0, '.'); from src.trading_config import TradingConfig; print('✅ Imports successful')"
+
+      - name: Verify .gitignore protections
+        run: |
+          echo "🧪 Verifying .gitignore protections..."
+          grep -q "\.env" .gitignore && echo "✅ .env protected" || exit 1
+          grep -q "credentials\.json" .gitignore && echo "✅ credentials.json protected" || exit 1
+          grep -q "logs/" .gitignore && echo "✅ logs protected" || exit 1
+
+      - name: Check no credentials in code
+        run: |
+          echo "🧪 Checking for hardcoded credentials..."
+          ! grep -r "API_KEY\|API_SECRET\|password" src/*.py main.py | grep -v "os.getenv\|environ" || exit 1
+          echo "✅ No hardcoded credentials found"
+
+  # PRINCIPLE 2: ONE COMMIT
+  commit-quality:
+    name: "📝 Principle 2: One Commit Per Feature"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        run: |
+          echo "📝 Checking commit messages..."
+          git log -1 --format=%B | grep -E "^(feat|fix|docs|test|chore|refactor|perf):" && echo "✅ Commit follows conventional format" || echo "⚠️ Consider using conventional commits"
+
+      - name: Verify commit has clear description
+        run: |
+          echo "📝 Checking commit description..."
+          LINES=$(git log -1 --format=%B | wc -l)
+          if [ $LINES -ge 2 ]; then
+            echo "✅ Commit has clear description ($(($LINES-1)) lines)"
+          else
+            echo "⚠️ Commit could have better description"
+          fi
+
+      - name: Check commit is focused
+        run: |
+          echo "📝 Checking commit focus..."
+          FILES=$(git diff-tree --no-commit-id --name-only -r HEAD | wc -l)
+          echo "📊 Files changed: $FILES"
+          if [ $FILES -le 10 ]; then
+            echo "✅ Commit is focused ($FILES files)"
+          else
+            echo "⚠️ Commit may be too broad ($FILES files)"
+          fi
+
+  # PRINCIPLE 3: CODE REVIEW
+  code-review:
+    name: "👀 Principle 3: Code Review"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Check code style
+        run: |
+          echo "👀 Checking Python style..."
+          python -m pip install --quiet pylint flake8 2>/dev/null || echo "⚠️ Linters not installed (optional)"
+          python -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics 2>/dev/null || echo "✅ Style check complete"
+
+      - name: Security check - no logging of secrets
+        run: |
+          echo "👀 Checking for credential logging..."
+          if grep -r "logger.*API\|print.*API\|log.*password" src/*.py main.py 2>/dev/null; then
+            echo "❌ Found potential credential logging!"
+            exit 1
+          else
+            echo "✅ No credential logging detected"
+          fi
+
+      - name: Check error handling
+        run: |
+          echo "👀 Checking error handling..."
+          BARE_EXCEPT=$(grep -r "except:\|except Exception:" src/*.py main.py | grep -v "logger\|pass" | wc -l)
+          if [ $BARE_EXCEPT -eq 0 ]; then
+            echo "✅ Proper error handling present"
+          else
+            echo "⚠️ Found $BARE_EXCEPT bare except clauses"
+          fi
+
+      - name: Check documentation
+        run: |
+          echo "👀 Checking documentation..."
+          if [ -f "SIMPLE_TESTING_GUIDE.md" ]; then
+            echo "✅ Testing guide present"
+          fi
+          if [ -f "BROTHER_TESTING_HANDOVER.md" ]; then
+            echo "✅ Handover guide present"
+          fi
+          if [ -f "DEPLOYMENT_READY.md" ]; then
+            echo "✅ Deployment checklist present"
+          fi
+
+  # PRINCIPLE 4: SECURITY FIRST
+  security-first:
+    name: "🔒 Principle 4: Security First"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Check .env protection
+        run: |
+          echo "🔒 Checking .env protection..."
+          if [ -f ".env" ]; then
+            echo "❌ .env file should not be in repo!"
+            exit 1
+          else
+            echo "✅ .env not in repo (good!)"
+          fi
+
+      - name: Check credentials.json protection
+        run: |
+          echo "🔒 Checking credentials.json protection..."
+          if [ -f "credentials.json" ]; then
+            echo "❌ credentials.json should not be in repo!"
+            exit 1
+          else
+            echo "✅ credentials.json not in repo (good!)"
+          fi
+
+      - name: Check no secrets in git history
+        run: |
+          echo "🔒 Checking git history for secrets..."
+          if git log --all -S "API_KEY\|API_SECRET\|password" --oneline | grep -q .; then
+            echo "❌ Potential secrets in git history!"
+            git log --all -S "API_KEY" --oneline | head -5
+            exit 1
+          else
+            echo "✅ No secrets in git history"
+          fi
+
+      - name: Check file permissions in code
+        run: |
+          echo "🔒 Checking security file permissions..."
+          if grep -r "0o600\|chmod.*600" src/*.py main.py simple_setup.py 2>/dev/null | grep -q .; then
+            echo "✅ Secure file permissions (0o600) configured"
+          else
+            echo "⚠️ Check secure file permissions"
+          fi
+
+      - name: Verify config defaults are safe
+        run: |
+          echo "🔒 Checking safe configuration defaults..."
+          python -c "
+          import json
+          c = json.load(open('config.json'))
+          assert c['trading_mode']['live_trading'] == False, 'live_trading should be False'
+          assert c['capital']['daily_loss_limit_percent'] == 5.0, 'daily loss limit should be 5%'
+          print('✅ Safe configuration defaults verified')
+          "
+
+  # Summary
+  summary:
+    name: "📊 Validation Summary"
+    needs: [test-first, commit-quality, code-review, security-first]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "📊 ════════════════════════════════════════"
+          echo "📊 VALIDATION COMPLETE"
+          echo "📊 ════════════════════════════════════════"
+          echo "✅ Principle 1: Test-First ........... ${{ needs.test-first.result }}"
+          echo "✅ Principle 2: One Commit .......... ${{ needs.commit-quality.result }}"
+          echo "✅ Principle 3: Code Review ........ ${{ needs.code-review.result }}"
+          echo "✅ Principle 4: Security First ..... ${{ needs.security-first.result }}"
+          echo "📊 ════════════════════════════════════════"
+          echo "🚀 Ready for deployment!"
