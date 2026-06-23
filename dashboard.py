@@ -284,7 +284,7 @@ PASSWORD={password_input}
         current_mode = 'paper'  # Default to paper mode
         if CONFIG_FILE.exists():
             try:
-                with open(CONFIG_FILE, 'r') as f:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                     config = json.load(f)
                     current_mode = 'live' if config.get('live_trading', False) else 'paper'
                 st.session_state.current_mode = current_mode
@@ -322,7 +322,7 @@ PASSWORD={password_input}
         try:
             # Load existing config or create new
             if CONFIG_FILE.exists():
-                with open(CONFIG_FILE, 'r') as f:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                     config = json.load(f)
             else:
                 config = {}
@@ -540,6 +540,15 @@ st.markdown(f"""
     /* STATUS COLORS (Still needed for function) */
     .status-online {{ color: #00ff00; text-shadow: none; }}
     .status-offline {{ color: #ff0000; text-shadow: none; }}
+
+    /* SIDEBAR HEADERS - READABLE */
+    h3 {{
+        color: #00ff00 !important;
+        text-shadow: 0 0 10px rgba(0,255,0,0.3) !important;
+    }}
+    h4 {{
+        color: #00ff00 !important;
+    }}
 
     /* BANNER: SIMPLE */
     .hologram-banner {{
