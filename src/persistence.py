@@ -88,28 +88,33 @@ class StateManager:
 
     @staticmethod
     def save_history(history: List[Position]):
-        """Save closed trades to JSON file"""
+        """Save closed trades to JSON file with atomic writes to prevent corruption"""
         try:
             os.makedirs("data", exist_ok=True)
-            
+
             data = []
             for pos in history:
                 data.append(pos.__dict__)
-                
-            # Atomic save
+
+            # Bug #19 Fix: Atomic save prevents corruption on crash
+            # Use temp file + os.replace (atomic rename) to ensure consistency
             hist_path = "data/daily_history.json"
             tmp_path = hist_path + ".tmp"
             with open(tmp_path, 'w') as f:
                 json.dump(data, f, default=StateManager._json_serial, indent=4)
-            
+
+            # os.replace is atomic on all platforms (Windows, Linux, macOS)
             os.replace(tmp_path, hist_path)
-                
-            logger.debug(f"Saved {len(history)} historical trades to state file")
-            
+
+            logger.debug(f"Saved {len(history)} historical trades to state file (atomic)")
+
         except Exception as e:
             logger.error(f"Failed to save history: {e}")
             if 'tmp_path' in locals() and os.path.exists(tmp_path):
-                os.remove(tmp_path)
+                try:
+                    os.remove(tmp_path)
+                except Exception as cleanup_e:
+                    logger.warning(f"Failed to cleanup temp file: {cleanup_e}")
 
     @staticmethod
     def load_history() -> List[Position]:
