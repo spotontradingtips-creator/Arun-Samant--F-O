@@ -376,12 +376,12 @@ class MStockAPI:
                     response = requests.get(url, headers=self.get_headers(), params=params, timeout=(10, 20))
                     if response.status_code != 200:
                         logger.error(f"[SMART RETRY FAILED] {token_id} returned {response.status_code}")
-                        logger.error(f"  Body: {response.text}")
+                        # Bug #15 Fix: Log only status code, never raw response body
                 else:
                     # Silence logs for numeric tokens (Futures volume proxy) to prevent console clutter
                     if not symbol.isdigit():
                         logger.error(f"[SMART FAIL] {symbol} fetch failed (400) and no token mapping found for {lookup_key}")
-                        logger.error(f"  Broker Response: {response.text}")
+                        # Bug #15 Fix: Log only status code, never raw response body
             
             # [NEW] ANTI-BLIND WATCHDOG: Global Fallback Trigger
             if response.status_code != 200:
@@ -1219,8 +1219,9 @@ class MStockAPI:
 
             if not isinstance(data, dict) or data.get("status") != "success":
                 logger.warning(f"Fund Summary error: {data.get('message') if isinstance(data, dict) else 'Unknown format'}")
-                if response.status_code == 200:
-                    logger.debug(f"Raw Fund Response: {response.text}")
+                # Bug #15 Fix: Log only status, never raw response body
+                if response.status_code != 200:
+                    logger.debug(f"Fund Summary: HTTP {response.status_code}")
                 return None
             
             # Mirae Type A structure typically returns available margin in 'TradingPower' or 'NetAvailable'
@@ -1439,7 +1440,7 @@ class MStockAPI:
             
             if response.status_code != 200:
                 logger.error(f"ERROR Order placement failed: HTTP {response.status_code}")
-                logger.error(f"Response: {response.text}")
+                # Bug #15 Fix: Log only status code, never raw response body
                 return None
             
             data = response.json()
