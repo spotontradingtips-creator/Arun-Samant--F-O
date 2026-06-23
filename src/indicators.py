@@ -1,11 +1,13 @@
 """
 Technical Indicators Module for F&O Trading Bot
-Implements MACD, RSI, and ADX calculations
+Implements MACD, RSI, ADX, IV (Implied Volatility), and HV (Historical Volatility) calculations
 """
 
 import pandas as pd
 import numpy as np
 from typing import Tuple
+from scipy.stats import norm
+from scipy.optimize import brentq
 
 
 class TechnicalIndicators:
@@ -302,35 +304,203 @@ class TechnicalIndicators:
         """
         Calculate Intraday VWAP (Resets daily)
         df must have 'high', 'low', 'close' columns and a datetime index.
-        If 'volume' is missing or all zeros, it falls back to a 
+        If 'volume' is missing or all zeros, it falls back to a
         Cumulative Moving Average (CMA) as a Synthetic VWAP.
         """
         if df is None or df.empty:
             return pd.Series()
-            
+
         # Ensure index is datetime
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index)
-            
+
         # Group by date and calculate
         # Typical Price = (H + L + C) / 3
         tp = (df['high'] + df['low'] + df['close']) / 3
-        
+
         # Check if volume is valid
         volume = df.get('volume', pd.Series(0, index=df.index))
         if volume.sum() == 0:
             # [FAILOVER] Use Synthetic VWAP (Cumulative Moving Average of Price)
             # This follows the same logic: "Is the price above today's average?"
             volume = pd.Series(1, index=df.index)
-            
+
         pv = tp * volume
-        
+
         # Cumulative sums per day
         tp_pv_cum = pv.groupby(df.index.date).cumsum()
         vol_cum = volume.groupby(df.index.date).cumsum()
-        
+
         # Prevent division by zero
         vol_cum = vol_cum.replace(0, np.nan)
         vwap = tp_pv_cum / vol_cum
-        
+
         return vwap
+
+    @staticmethod
+    def calculate_historical_volatility(prices: np.ndarray, period: int = 20) -> float:
+        """
+        Calculate Historical Volatility (HV) from price data
+
+        Parameters:
+        -----------
+        prices : np.ndarray
+            Array of historical prices
+        period : int
+            Number of periods to use for calculation (default: 20)
+
+        Returns:
+        --------
+        float
+            Annualized historical volatility (0-1, e.g., 0.25 = 25%)
+        """
+        if len(prices) < 2:
+            return 0.0
+
+        prices = np.array(prices, dtype=float)
+
+        # Validate: all prices must be positive
+        if np.any(prices <= 0):
+            return 0.0
+
+        # Calculate log returns
+        returns = np.diff(np.log(prices))
+
+        # Need at least 2 returns for std calculation
+        if len(returns) < 2:
+            return 0.0
+
+        # Use last 'period' returns
+        if len(returns) > period:
+            returns = returns[-period:]
+
+        # Standard deviation of returns
+        daily_volatility = np.std(returns, ddof=1)
+
+        # Annualize (252 trading days in a year)
+        annual_volatility = daily_volatility * np.sqrt(252)
+
+        return max(0.0, annual_volatility)  # Ensure non-negative
+
+    @staticmethod
+    def _black_scholes_call(S: float, K: float, T: float, r: float, sigma: float) -> float:
+        """
+        Black-Scholes call option price
+
+        Parameters:
+        -----------
+        S : float
+            Spot price
+        K : float
+            Strike price
+        T : float
+            Time to expiry (in years)
+        r : float
+            Risk-free rate
+        sigma : float
+            Volatility (annualized)
+
+        Returns:
+        --------
+        float
+            Call option price
+        """
+        if T <= 0 or sigma <= 0:
+            return max(S - K, 0.0)
+
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+
+        call = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+        return max(call, 0.0)
+
+    @staticmethod
+    def _black_scholes_put(S: float, K: float, T: float, r: float, sigma: float) -> float:
+        """
+        Black-Scholes put option price
+
+        Parameters:
+        -----------
+        S : float
+            Spot price
+        K : float
+            Strike price
+        T : float
+            Time to expiry (in years)
+        r : float
+            Risk-free rate
+        sigma : float
+            Volatility (annualized)
+
+        Returns:
+        --------
+        float
+            Put option price
+        """
+        if T <= 0 or sigma <= 0:
+            return max(K - S, 0.0)
+
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+
+        put = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+        return max(put, 0.0)
+
+    @staticmethod
+    def calculate_implied_volatility(
+        spot: float,
+        strike: float,
+        expiry_days: int,
+        rate: float,
+        option_price: float,
+        option_type: str = "CALL"
+    ) -> float:
+        """
+        Calculate Implied Volatility (IV) using Newton-Raphson method
+        Solves for sigma in Black-Scholes equation: BS_Price(sigma) = market_price
+
+        Parameters:
+        -----------
+        spot : float
+            Current spot price
+        strike : float
+            Strike price
+        expiry_days : int
+            Days to expiry
+        rate : float
+            Risk-free rate (annual, e.g., 0.05 for 5%)
+        option_price : float
+            Market price of the option
+        option_type : str
+            "CALL" or "PUT"
+
+        Returns:
+        --------
+        float
+            Implied Volatility as decimal (0-1, e.g., 0.25 = 25%)
+        """
+        # Validate inputs
+        if option_price <= 0 or spot <= 0 or strike <= 0 or expiry_days <= 0:
+            return 0.0
+
+        # Convert days to years
+        T = expiry_days / 365.0
+
+        # Select pricing function
+        if option_type.upper() in ["CALL", "CE"]:
+            price_func = TechnicalIndicators._black_scholes_call
+        else:
+            price_func = TechnicalIndicators._black_scholes_put
+
+        # Define objective function: BS_price(sigma) - market_price
+        def objective(sigma):
+            return price_func(spot, strike, T, rate, sigma) - option_price
+
+        try:
+            # Use Brent's method for root finding
+            # Search between 0.001 (0.1%) and 3.0 (300%) volatility
+            iv = brentq(objective, 0.001, 3.0, maxiter=100)
+            return min(max(iv, 0.0), 3.0)  # Clamp to [0, 3]
+        except ValueError:
+            # If Brent's method fails, return initial guess
+            return 0.2  # Default to 20% IV
