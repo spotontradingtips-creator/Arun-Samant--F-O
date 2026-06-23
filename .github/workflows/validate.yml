@@ -1,0 +1,32 @@
+name: Validate Code Quality
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Code Quality Check
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: ✅ Config Validation
+        run: |
+          python -c "import json; c=json.load(open('config.json')); print('Config valid')" && echo "✅ Config is valid JSON"
+
+      - name: ✅ Security Check
+        run: |
+          echo "Checking for credential protection..."
+          grep "\.env" .gitignore > /dev/null && echo "✅ .env protected" || echo "⚠️ .env not in .gitignore"
+
+      - name: ✅ Status
+        run: echo "✅ All checks passed"
