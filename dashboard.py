@@ -10,12 +10,23 @@ import os
 import sys
 import json
 from datetime import datetime
+from pathlib import Path
 import time
 import glob
 import subprocess
 import psutil
 from dotenv import load_dotenv
 from src.utils import setup_logging
+
+# ============================================================================
+# INITIALIZATION - Load environment once at module startup
+# ============================================================================
+# Get absolute path to .env file (not relative to working directory)
+PROJECT_ROOT = Path(__file__).parent
+ENV_FILE = PROJECT_ROOT / '.env'
+
+# Load environment variables once at startup (before Streamlit reruns)
+load_dotenv(ENV_FILE, override=True)
 
 # Initialize Logger (Isolated)
 logger = setup_logging(log_file="logs/dashboard.log")
@@ -40,6 +51,98 @@ t = {
 with st.sidebar:
     st.markdown("### SYSTEM")
     st.markdown("**MODE:** ULTRA_MINIMAL")
+    st.markdown("---")
+
+    # ============================================================================
+    # FEATURE 1: SETTINGS PANEL - Credential Management
+    # ============================================================================
+    with st.expander("⚙️ SETTINGS", expanded=False):
+        st.markdown("#### API Credentials")
+
+        # Input fields for credentials
+        api_key_input = st.text_input(
+            "API Key",
+            type="password",
+            placeholder="Enter your API key",
+            help="Your broker API key (not logged in plaintext)"
+        )
+
+        api_secret_input = st.text_input(
+            "API Secret",
+            type="password",
+            placeholder="Enter your API secret",
+            help="Your broker API secret (not logged in plaintext)"
+        )
+
+        client_code_input = st.text_input(
+            "Client Code",
+            placeholder="Enter your client code",
+            help="Your broker client code"
+        )
+
+        password_input = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter your password",
+            help="Your broker password (not logged in plaintext)"
+        )
+
+        # Save credentials button
+        if st.button("💾 Save Credentials", key="save_creds"):
+            # Validate inputs
+            if not all([api_key_input, api_secret_input, client_code_input, password_input]):
+                st.error("❌ All fields are required!")
+            elif len(api_key_input) < 5 or len(api_secret_input) < 5 or len(client_code_input) < 1 or len(password_input) < 1:
+                st.error("❌ API key and secret must be at least 5 characters!")
+            else:
+                # Save to .env file securely (using absolute path from module startup)
+                try:
+                    env_content = f"""API_KEY={api_key_input}
+API_SECRET={api_secret_input}
+CLIENT_CODE={client_code_input}
+PASSWORD={password_input}
+"""
+                    with open(ENV_FILE, 'w') as f:
+                        f.write(env_content)
+
+                    # Secure file permissions (0o600 = rw-------)
+                    # Note: On Windows, this is a no-op but doesn't error
+                    os.chmod(ENV_FILE, 0o600)
+
+                    # Log update without plaintext (PRINCIPLE 4: SECURITY-FIRST)
+                    logger.info("[SETTINGS] API credentials updated successfully (no plaintext logged)")
+
+                    # Warning for Windows users (file permissions not enforced on Windows)
+                    if os.name == 'nt':
+                        st.warning("⚠️ On Windows, file permissions are limited. Use OS-level access controls to protect credentials.")
+
+                    st.success("✅ Credentials saved securely!")
+                    st.rerun()
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Error saving credentials: {str(e)}")
+                    st.error(f"❌ Error saving credentials: {str(e)}")
+
+        st.markdown("---")
+
+        # Display current status (masked)
+        # Note: ENV_FILE was loaded at module startup, no need to reload
+        st.markdown("#### Current Status")
+        has_api_key = bool(os.getenv('API_KEY'))
+        has_api_secret = bool(os.getenv('API_SECRET'))
+        has_client_code = bool(os.getenv('CLIENT_CODE'))
+        has_password = bool(os.getenv('PASSWORD'))
+
+        status_items = [
+            ("API Key", has_api_key),
+            ("API Secret", has_api_secret),
+            ("Client Code", has_client_code),
+            ("Password", has_password),
+        ]
+
+        for field, has_value in status_items:
+            status_icon = "✅" if has_value else "❌"
+            st.markdown(f"{status_icon} **{field}**: {'Configured' if has_value else 'Not configured'}")
+
     st.markdown("---")
 
 # DYNAMIC MINIMALIST CSS
