@@ -1,0 +1,302 @@
+================================================================================
+ANTIGRAVITY QUICK REFERENCE CARD
+One-Page Cheat Sheet for Arun Samant
+================================================================================
+
+📌 EVERY TIME YOU WANT ANTIGRAVITY TO DO WORK, USE THIS FORMAT:
+
+@Antigravity: [TASK]
+Reference: ANTIGRAVITY_STANDARD_WORKFLOW.md
+
+Examples:
+- @Antigravity: FIX BUG-001: Order rejection orphans position
+- @Antigravity: FEATURE: Add position reconciliation
+- @Antigravity: ENHANCE: Improve order fill confirmation
+- @Antigravity: THINK: How can we improve risk management?
+
+================================================================================
+9 PHASES THAT ANTIGRAVITY AUTOMATICALLY FOLLOWS:
+================================================================================
+
+Phase 1: INTAKE & VISION ALIGNMENT
+├─ Validate: Is this aligned with our vision?
+├─ Categorize: CRITICAL/HIGH/MEDIUM/LOW?
+└─ Estimate: How much effort?
+
+Phase 2: PLANNING & ARCHITECTURE
+├─ Design approach (minimal, focused)
+├─ Define success criteria
+└─ Check 4 principles
+
+Phase 3: TEST-FIRST DEVELOPMENT (TDD)
+├─ RED: Write failing test
+├─ GREEN: Implement minimal fix
+├─ IMPROVE: Refactor & optimize
+└─ Coverage must be 80%+
+
+Phase 4: SECURITY & VALIDATION
+├─ Security scan (bandit, mypy)
+├─ Input validation
+└─ NO SECRETS in code/logs
+
+Phase 5: CODE REVIEW GATE
+├─ Mandatory code review
+├─ Fix CRITICAL/HIGH issues
+└─ Approve before merge
+
+Phase 6: DOCUMENTATION & ALIGNMENT
+├─ UPDATE existing docs (don't create new ones)
+├─ BUG_REGISTRY.md (mark bugs fixed)
+├─ FIX_LOG.md (log what changed & why)
+├─ Archive old docs when no longer relevant
+└─ Verify vision alignment
+
+Phase 7: REGRESSION & PREFLIGHT
+├─ All tests passing (175/175)?
+├─ Preflight 25/25 checks?
+└─ Manual regression tests?
+
+Phase 8: DEPLOYMENT & MONITORING
+├─ Pre-deployment checklist
+├─ Deploy carefully
+└─ Monitor hour 1 intensely
+
+Phase 9: CONTINUOUS IMPROVEMENT
+├─ Weekly review cycle
+└─ Monthly deep dive
+
+================================================================================
+4 CORE PRINCIPLES (MUST FOLLOW FOR EVERY WORK):
+================================================================================
+
+✅ PRINCIPLE 1: Test-First Development
+   Write tests BEFORE code. All work tested with 80%+ coverage.
+
+✅ PRINCIPLE 2: One Commit Per Bug
+   Each bug/feature = one clear, focused commit.
+
+✅ PRINCIPLE 3: Code Review Mandatory
+   All code reviewed before merge. Issues fixed before merging.
+
+✅ PRINCIPLE 4: Security First
+   No hardcoded secrets. No credential leaks. No vulnerabilities.
+
+================================================================================
+DOCUMENTATION RULE - NO BLOAT:
+================================================================================
+
+✅ UPDATE existing docs (BUG_REGISTRY.md, FIX_LOG.md)
+❌ DON'T create new docs unless absolutely essential
+❌ DON'T duplicate information
+❌ DO archive old docs when no longer relevant
+
+Bloat Check Before Creating Any New Doc:
+- Does this info exist elsewhere? → Update that instead
+- Is this essential? → NO? Don't document it
+- Can this fit in existing docs? → YES? Add there instead
+- Have we planned archival? → If not, don't create it
+
+Result: Clean, lean, maintainable documentation.
+
+================================================================================
+PREFLIGHT CHECKLIST (MUST BE 25/25 BEFORE DEPLOY):
+================================================================================
+
+✅ Git initialized with .gitignore
+✅ No credentials.json in git history
+✅ credentials.json has 0o600 permissions
+✅ No API keys in code
+✅ No secrets in logs
+✅ Type hints 100% coverage (mypy passes)
+✅ Security scan passes (bandit)
+✅ All tests passing (175/175)
+✅ Code coverage 80%+
+✅ No bare exception clauses
+✅ All imports used
+✅ No undefined variables
+✅ All functions documented
+✅ Functions < 50 lines
+✅ Files < 800 lines
+✅ No hardcoded values (except constants)
+✅ Daily loss limit enforced
+✅ Order rejection retry logic works
+✅ Position reconciliation passes
+✅ SymbolMaster optimized (singleton)
+✅ Error handling comprehensive
+✅ Telegram alerts configured
+✅ Backup created (3+ locations)
+✅ BUG_REGISTRY.md updated
+✅ FIX_LOG.md updated
+✅ Vision alignment verified
+
+================================================================================
+WHAT ANTIGRAVITY WILL DELIVER:
+================================================================================
+
+For EVERY piece of work, you get:
+
+✅ Working code with 80%+ test coverage
+✅ All tests passing (unit + integration + E2E)
+✅ Security scan passed (no vulnerabilities)
+✅ Code review approved (no blockers)
+✅ Preflight 25/25 checks passed
+✅ Documentation updated (BUG_REGISTRY + FIX_LOG)
+✅ Vision alignment verified
+✅ Ready to deploy or flagged with blockers
+
+Example output:
+─────────────────────────────────────────
+✅ BUG-001 FIXED
+Tests: 5 new tests, all passing ✅
+Coverage: 88% (target: 80%+) ✅
+Security: Passed (0 vulnerabilities) ✅
+Code Review: Approved ✅
+Preflight: 25/25 passed ✅
+Docs: Updated ✅
+
+Ready to deploy! ✅
+─────────────────────────────────────────
+
+================================================================================
+WHEN SOMETHING GOES WRONG:
+================================================================================
+
+❌ Tests Fail → STOP. Don't merge. Fix & retry.
+❌ Security Scan Fails → STOP. Don't merge. Fix & retry.
+❌ Code Review Finds Issues → STOP. Don't merge. Fix & retry.
+❌ Preflight Fails → STOP. Don't deploy. Fix & retry.
+❌ Production Breaks → ROLLBACK to backup immediately.
+
+Remember: Better to pause and fix than deploy broken code.
+
+================================================================================
+VISION ALIGNMENT (ALWAYS CHECK):
+================================================================================
+
+Every piece of work must move toward:
+
+🎯 GOAL 1: Transform from "risky prototype" to "production-ready system"
+🎯 GOAL 2: Eliminate capital loss due to operational bugs (currently 27%)
+🎯 GOAL 3: Achieve 80%+ test coverage (currently 0%)
+🎯 GOAL 4: Implement TDD + code review (currently none)
+🎯 GOAL 5: Protect credentials & data (currently at risk)
+
+If work doesn't support these goals → Ask why or adjust.
+
+================================================================================
+DOCUMENTATION FILES TO KNOW:
+================================================================================
+
+📄 ANTIGRAVITY_STANDARD_WORKFLOW.md
+   The complete 9-phase framework (read this first)
+
+📄 VISION_AND_GOALS.md
+   Why we're doing this transformation
+
+📄 PRINCIPLES_CHECKLIST.md
+   Daily reference for 4 core principles
+
+📄 BUG_REGISTRY.md
+   Central tracking of all 21 bugs (update weekly)
+
+📄 FIX_LOG.md
+   Log of what's been fixed (update each week)
+
+📄 BACKUP_AND_RECOVERY_PLAN.md
+   How to rollback if something breaks
+
+📄 AUDIT_SUMMARY_FOR_BROTHER.md
+   Summary of findings for quick reference
+
+================================================================================
+EXAMPLE WORKFLOW:
+================================================================================
+
+Step 1: Think of what you need
+   "I want to fix the order rejection bug"
+
+Step 2: Send to Antigravity
+   @Antigravity: FIX BUG-001: Order rejection orphans position
+   Reference: ANTIGRAVITY_STANDARD_WORKFLOW.md
+
+Step 3: Antigravity follows all 9 phases automatically
+   ✅ Phase 1: Validates alignment
+   ✅ Phase 2: Plans approach
+   ✅ Phase 3: TDD (test first)
+   ✅ Phase 4: Security scan
+   ✅ Phase 5: Code review
+   ✅ Phase 6: Docs updated
+   ✅ Phase 7: All tests passing
+   ✅ Phase 8: Ready to deploy
+   ✅ Phase 9: Continuous monitoring
+
+Step 4: Antigravity delivers
+   ✅ Fixed code with 5+ tests
+   ✅ Security scan passed
+   ✅ Code review approved
+   ✅ Preflight 25/25 passed
+   ✅ Docs updated
+   ✅ Ready to deploy
+
+Step 5: You deploy when ready
+   All checks passed, no surprises.
+
+================================================================================
+ONE-MINUTE SUMMARY:
+================================================================================
+
+This framework ensures EVERY piece of work:
+1. Is tested (80%+ coverage)
+2. Is reviewed (no blockers)
+3. Is secure (no vulnerabilities)
+4. Is documented (current & accurate)
+5. Supports vision (aligned with goals)
+6. Passes preflight (25/25 checks)
+7. Can be deployed (or easily rolled back)
+
+Result: You move from "risky prototype" to "production-ready system"
+
+✅ No bugs slip through
+✅ No code breaks production
+✅ No capital is lost to operational issues
+✅ You sleep peacefully knowing the bot is solid
+
+================================================================================
+READY TO USE?
+================================================================================
+
+When you're ready:
+
+1. Read: ANTIGRAVITY_STANDARD_WORKFLOW.md (full reference)
+2. Keep: This ANTIGRAVITY_QUICK_REFERENCE.txt (quick lookup)
+3. Reference: Both documents in every @Antigravity request
+4. Trust: Antigravity will follow all 9 phases automatically
+
+Then just request work and watch the magic happen! 🚀
+
+================================================================================
+Questions?
+================================================================================
+
+Check these docs for answers:
+
+What are all 21 bugs? → BUG_REGISTRY.md
+How do I do TDD? → PRINCIPLES_CHECKLIST.md (Principle 1)
+How do I commit? → PRINCIPLES_CHECKLIST.md (Principle 2)
+How do secrets stay safe? → SECRETS_MANAGEMENT_GUIDE.md
+What if something breaks? → BACKUP_AND_RECOVERY_PLAN.md
+What's the roadmap? → EXECUTION_ROADMAP.md or VISION_AND_GOALS.md
+
+================================================================================
+
+Prepared for: Arun Samant
+Project: F&O Trading Bot
+Date: 2026-06-23
+Version: 1.0
+
+Use this framework for ALL future development work.
+Trust the process. Quality follows.
+
+🚀 Let's build something great!
+
+================================================================================
