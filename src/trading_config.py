@@ -155,12 +155,12 @@ class TradingConfig:
             return
         
         try:
-            with open(config_file, 'r') as f:
+            with open(config_file, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
-            
-            # Load trading mode - Hardcoded to True per user request
-            self.live_trading = True
+
+            # Load trading mode from config (MUST respect live_trading=false for safety)
             if 'trading_mode' in config_data:
+                self.live_trading = config_data['trading_mode'].get('live_trading', False)
                 self.strike_depth = config_data['trading_mode'].get('strike_depth', 0)
             
             # Load capital settings
